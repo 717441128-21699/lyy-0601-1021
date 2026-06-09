@@ -7,6 +7,8 @@ import {
   BorrowModal,
   ReturnModal,
   AssetFormModal,
+  ReminderModal,
+  ReminderHistoryModal,
 } from '@/components/modals';
 import AssetLedgerPage from '@/pages/AssetLedger';
 import BorrowRequestPage from '@/pages/BorrowRequest';
@@ -72,6 +74,8 @@ export default function App() {
         <BorrowModal />
         <ReturnModal />
         <AssetFormModal />
+        <ReminderModal />
+        <ReminderHistoryModal />
       </div>
     </Router>
   );

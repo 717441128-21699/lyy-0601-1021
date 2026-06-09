@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useAssetStore, useBorrowStore, useUserStore } from '@/store';
+import { useAssetStore, useBorrowStore, useUserStore, useUIStore } from '@/store';
 import { PageContainer, PageHeader } from '@/components/Layout/PageContainer';
 import { StatCard } from '@/components/charts/StatCard';
 import { LineChart } from '@/components/charts/LineChart';
@@ -23,15 +23,21 @@ import {
   AlertCircle,
   RefreshCw,
   Filter,
+  Bell,
+  History,
 } from 'lucide-react';
 
 const StatisticsPage: React.FC = () => {
   const { assets, categories } = useAssetStore();
-  const { records, getOverdueRecords, updateOverdueStatus } = useBorrowStore();
+  const { records, getOverdueRecords, updateOverdueStatus, getRemindersForRecord } = useBorrowStore();
   const { departments } = useUserStore();
+  const { openReminderModal, openReminderHistoryModal } = useUIStore();
+  const { currentUser } = useUserStore();
   const [selectedDepartment, setSelectedDepartment] = React.useState('');
   const [selectedMonth, setSelectedMonth] = React.useState('');
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  const isApprover = currentUser?.role === 'approver' || currentUser?.role === 'admin';
 
   React.useEffect(() => {
     updateOverdueStatus();
@@ -92,10 +98,10 @@ const StatisticsPage: React.FC = () => {
   const borrowedAssets = assets.filter(a => a.status === 'borrowed').length;
   const maintenanceAssets = assets.filter(a => a.status === 'maintenance').length;
 
-  const allOverdueRecords = getOverdueRecords();
-  const overdueRecords = selectedDepartment 
-    ? allOverdueRecords.filter(r => r.userDepartment === selectedDepartment)
-    : allOverdueRecords;
+  const overdueRecords = getOverdueRecords({
+    department: selectedDepartment || undefined,
+    month: selectedMonth || undefined,
+  });
 
   const totalBorrowCount = filteredRecords.filter(r => 
     ['approved', 'returned', 'damaged'].includes(r.status)
@@ -112,15 +118,7 @@ const StatisticsPage: React.FC = () => {
       const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
       const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
       
-      let recordsToCount = filteredRecords;
-      if (!selectedMonth) {
-        recordsToCount = [...records];
-        if (selectedDepartment) {
-          recordsToCount = recordsToCount.filter(r => r.userDepartment === selectedDepartment);
-        }
-      }
-      
-      const count = recordsToCount.filter(r => {
+      const count = filteredRecords.filter(r => {
         const created = new Date(r.createdAt);
         return created >= monthStart && created <= monthEnd && 
                ['approved', 'returned', 'damaged'].includes(r.status);
@@ -130,19 +128,12 @@ const StatisticsPage: React.FC = () => {
     }
     
     return counts;
-  }, [records, filteredRecords, selectedDepartment, selectedMonth]);
+  }, [filteredRecords]);
 
   const departmentUsage = React.useMemo(() => {
     const deptMap = new Map<string, number>();
     
-    let recordsToUse = filteredRecords;
-    if (!selectedMonth && selectedDepartment) {
-      recordsToUse = records.filter(r => r.userDepartment === selectedDepartment);
-    } else if (!selectedMonth && !selectedDepartment) {
-      recordsToUse = records;
-    }
-    
-    recordsToUse.forEach(r => {
+    filteredRecords.forEach(r => {
       if (['approved', 'returned', 'damaged'].includes(r.status)) {
         deptMap.set(r.userDepartment, (deptMap.get(r.userDepartment) || 0) + 1);
       }
@@ -156,7 +147,7 @@ const StatisticsPage: React.FC = () => {
     return selectedDepartment 
       ? result.filter(d => d.name === selectedDepartment)
       : result;
-  }, [records, filteredRecords, departments, selectedDepartment, selectedMonth]);
+  }, [filteredRecords, departments, selectedDepartment]);
 
   const categoryDistribution = React.useMemo(() => {
     return categories.map(c => ({
@@ -244,12 +235,57 @@ const StatisticsPage: React.FC = () => {
       ),
     },
     {
+      key: 'reminders',
+      header: '催还次数',
+      accessor: (record: BorrowRecord) => {
+        const reminders = getRemindersForRecord(record.id);
+        return (
+          <span className={cn(
+            'px-2 py-1 rounded-full text-xs font-medium',
+            reminders.length > 0 ? 'bg-warning-100 text-warning-700' : 'bg-dark-100 text-dark-600'
+          )}>
+            {reminders.length} 次
+          </span>
+        );
+      },
+    },
+    {
       key: 'status',
       header: '状态',
       accessor: (record: BorrowRecord) => (
         <StatusBadge type="borrow" status={record.status} size="sm" />
       ),
     },
+    ...(isApprover ? [{
+      key: 'actions',
+      header: '操作',
+      accessor: (record: BorrowRecord) => (
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Bell className="w-3.5 h-3.5 text-warning-600" />}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              openReminderModal(record.id);
+            }}
+          >
+            催还
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<History className="w-3.5 h-3.5" />}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              openReminderHistoryModal(record.id);
+            }}
+          >
+            历史
+          </Button>
+        </div>
+      ),
+    }] : []),
   ];
 
   const idleColumns = [
@@ -600,7 +636,11 @@ const StatisticsPage: React.FC = () => {
             <AlertTriangle className="w-5 h-5 text-danger-500" />
             <h3 className="text-lg font-semibold text-dark-800 font-display">
               逾期名单
-              {selectedDepartment && <span className="text-sm font-normal text-dark-500 ml-2">（{selectedDepartment}）</span>}
+              {(selectedDepartment || selectedMonth) && (
+                <span className="text-sm font-normal text-dark-500 ml-2">
+                  （{[selectedDepartment && selectedDepartment, selectedMonth && `${selectedMonth.split('-')[0]}年${selectedMonth.split('-')[1]}月`].filter(Boolean).join(' · ')}）
+                </span>
+              )}
             </h3>
             {overdueRecords.length > 0 && (
               <span className="bg-danger-100 text-danger-600 px-2 py-0.5 rounded-full text-xs font-medium">

@@ -8,6 +8,10 @@ export type DamageLevel = 'none' | 'minor' | 'moderate' | 'severe';
 
 export type CalendarView = 'month' | 'week' | 'list';
 
+export type ReminderMethod = 'email' | 'sms' | 'phone' | 'wechat' | 'other';
+
+export type ReminderStatus = 'pending' | 'sent' | 'failed';
+
 export interface Asset {
   id: string;
   name: string;
@@ -25,6 +29,24 @@ export interface Asset {
   attachments: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ReminderRecord {
+  id: string;
+  borrowRecordId: string;
+  assetId: string;
+  assetName: string;
+  userId: string;
+  userName: string;
+  userDepartment: string;
+  method: ReminderMethod;
+  note: string;
+  status: ReminderStatus;
+  remindedBy: string;
+  remindedByName: string;
+  remindedAt: string;
+  expectedReturnDate: string;
+  daysOverdue: number;
 }
 
 export interface BorrowRecord {
@@ -47,6 +69,7 @@ export interface BorrowRecord {
   damageNote: string;
   createdAt: string;
   approvedAt: string | null;
+  reminders: ReminderRecord[];
 }
 
 export interface User {
@@ -79,10 +102,29 @@ export interface CreateBorrowRequest {
   purpose: string;
 }
 
+export interface CreateMultiBorrowRequest {
+  assetIds: string[];
+  borrowDate: string;
+  expectedReturnDate: string;
+  purpose: string;
+}
+
 export interface ReturnAssetData {
   damageLevel: DamageLevel;
   repairCost: number;
   damageNote: string;
+}
+
+export interface CreateReminderRequest {
+  borrowRecordId: string;
+  method: ReminderMethod;
+  note: string;
+}
+
+export interface AssetConflictInfo {
+  assetId: string;
+  assetName: string;
+  conflicts: { date: string; records: BorrowRecord[] }[];
 }
 
 export interface AssetFilters {

@@ -21,6 +21,8 @@ import {
   AlertTriangle,
   ScanLine,
   AlertCircle,
+  Bell,
+  History,
 } from 'lucide-react';
 
 type TabMode = 'pending' | 'borrowed' | 'returned';
@@ -36,8 +38,8 @@ const statusOptions: { value: BorrowStatus | 'all'; label: string }[] = [
 ];
 
 const ApprovalReturnPage: React.FC = () => {
-  const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus } = useBorrowStore();
-  const { openReturnModal } = useUIStore();
+  const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus, getRemindersForRecord } = useBorrowStore();
+  const { openReturnModal, openReminderModal, openReminderHistoryModal } = useUIStore();
   const { currentUser } = useUserStore();
   const [activeTab, setActiveTab] = React.useState<TabMode>('pending');
   const [keyword, setKeyword] = React.useState('');
@@ -243,24 +245,72 @@ const ApprovalReturnPage: React.FC = () => {
         <p className="text-sm text-dark-600">{record.approverName}</p>
       ),
     },
+    {
+      key: 'reminders',
+      header: '催还',
+      accessor: (record: BorrowRecord) => {
+        if (record.status !== 'overdue') return null;
+        const reminders = getRemindersForRecord(record.id);
+        return (
+          <span className={cn(
+            'px-2 py-1 rounded-full text-xs font-medium',
+            reminders.length > 0 ? 'bg-warning-100 text-warning-700' : 'bg-dark-100 text-dark-600'
+          )}>
+            {reminders.length} 次
+          </span>
+        );
+      },
+    },
     ...(isApprover || isEmployee ? [{
       key: 'actions',
       header: '操作',
       accessor: (record: BorrowRecord) => {
         const canReturn = isApprover || (isEmployee && currentUser && record.userId === currentUser.id);
-        return canReturn ? (
-          <Button
-            size="sm"
-            variant={record.status === 'overdue' ? 'danger' : 'primary'}
-            icon={<ScanLine className="w-4 h-4" />}
-            onClick={(e: React.MouseEvent) => {
-              e.stopPropagation();
-              openReturnModal(record.id);
-            }}
-          >
-            {record.status === 'overdue' ? '逾期归还' : '归还'}
-          </Button>
-        ) : null;
+        const isOverdue = record.status === 'overdue';
+        
+        return (
+          <div className="flex items-center gap-2 flex-wrap">
+            {canReturn && (
+              <Button
+                size="sm"
+                variant={isOverdue ? 'danger' : 'primary'}
+                icon={<ScanLine className="w-3.5 h-3.5" />}
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  openReturnModal(record.id);
+                }}
+              >
+                {isOverdue ? '逾期归还' : '归还'}
+              </Button>
+            )}
+            {isOverdue && isApprover && (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<Bell className="w-3.5 h-3.5 text-warning-600" />}
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    openReminderModal(record.id);
+                  }}
+                >
+                  催还
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  icon={<History className="w-3.5 h-3.5" />}
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    openReminderHistoryModal(record.id);
+                  }}
+                >
+                  历史
+                </Button>
+              </>
+            )}
+          </div>
+        );
       },
     }] : []),
   ];

@@ -155,6 +155,29 @@ for (let i = 0; i < 80; i++) {
   const damageLevels: BorrowRecord['damageLevel'][] = ['none', 'none', 'none', 'minor', 'moderate', 'severe'];
   const damageLevel = status === 'damaged' ? damageLevels[i % damageLevels.length] : 'none';
   
+  const reminders: BorrowRecord['reminders'] = [];
+  
+  if (status === 'overdue' && i % 2 === 0) {
+    const reminderDate = addDays(today, -5);
+    reminders.push({
+      id: `rem-${i}`,
+      borrowRecordId: generateId('bor', i + 1),
+      assetId: asset.id,
+      assetName: asset.name,
+      userId: user.id,
+      userName: user.name,
+      userDepartment: user.departmentName,
+      method: ['email', 'phone', 'wechat'][i % 3] as any,
+      note: '请尽快归还逾期资产，以免影响其他同事使用',
+      status: 'sent',
+      remindedBy: approver.id,
+      remindedByName: approver.name,
+      remindedAt: reminderDate.toISOString(),
+      expectedReturnDate: formatDate(expectedReturnDate),
+      daysOverdue: Math.ceil((today.getTime() - expectedReturnDate.getTime()) / (1000 * 60 * 60 * 24)),
+    });
+  }
+  
   borrowRecords.push({
     id: generateId('bor', i + 1),
     assetId: asset.id,
@@ -175,6 +198,7 @@ for (let i = 0; i < 80; i++) {
     damageNote: status === 'damaged' ? '设备外壳有轻微划痕，屏幕角落有磕碰' : '',
     createdAt: formatDate(addDays(today, -20 + i)),
     approvedAt,
+    reminders,
   });
 }
 

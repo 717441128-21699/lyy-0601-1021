@@ -18,15 +18,23 @@ import {
   AlertTriangle,
   Eye,
   Pencil,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  CheckCircle2,
+  Info,
 } from 'lucide-react';
 
 export const AssetDetailPanel: React.FC = () => {
-  const { showAssetDetail, activeAssetId, closeAssetDetail, openBorrowModal, openAssetForm } = useUIStore();
+  const { showAssetDetail, activeAssetId, closeAssetDetail, openBorrowModal, openAssetForm, navigateToBorrowRecord } = useUIStore();
   const { getAssetById } = useAssetStore();
-  const { fetchRecords } = useBorrowStore();
+  const { fetchRecords, getAssetOccupancy } = useBorrowStore();
   const { currentUser } = useUserStore();
-  const [activeTab, setActiveTab] = React.useState<'info' | 'history'>('info');
+  const [activeTab, setActiveTab] = React.useState<'info' | 'history' | 'timeline'>('info');
   const [borrowHistory, setBorrowHistory] = React.useState<any[]>([]);
+  const [occupancy, setOccupancy] = React.useState<any[]>([]);
+  const [timelineMonth, setTimelineMonth] = React.useState(new Date());
 
   const isAdmin = currentUser?.role === 'admin';
   const canEdit = isAdmin;
@@ -39,9 +47,78 @@ export const AssetDetailPanel: React.FC = () => {
     }
   }, [activeAssetId, fetchRecords]);
 
+  React.useEffect(() => {
+    if (activeAssetId) {
+      const occ = getAssetOccupancy(activeAssetId, 60);
+      setOccupancy(occ);
+    }
+  }, [activeAssetId, getAssetOccupancy]);
+
   if (!showAssetDetail || !asset) return null;
 
   const canBorrow = asset.status === 'available';
+
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startDay = firstDay.getDay();
+    
+    const days: { date: Date; isCurrentMonth: boolean }[] = [];
+    
+    for (let i = startDay - 1; i >= 0; i--) {
+      const d = new Date(year, month, -i);
+      days.push({ date: d, isCurrentMonth: false });
+    }
+    
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push({ date: new Date(year, month, i), isCurrentMonth: true });
+    }
+    
+    const remainingDays = 42 - days.length;
+    for (let i = 1; i <= remainingDays; i++) {
+      days.push({ date: new Date(year, month + 1, i), isCurrentMonth: false });
+    }
+    
+    return days;
+  };
+
+  const getOccupancyForDate = (date: Date) => {
+    const dateStr = formatDate(date);
+    return occupancy.filter(r => 
+      r.borrowDate <= dateStr && r.expectedReturnDate >= dateStr
+    );
+  };
+
+  const isToday = (date: Date) => {
+    const today = new Date();
+    return date.getDate() === today.getDate() &&
+           date.getMonth() === today.getMonth() &&
+           date.getFullYear() === today.getFullYear();
+  };
+
+  const isPast = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return date < today;
+  };
+
+  const isWithin60Days = (date: Date) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const futureDate = new Date(today);
+    futureDate.setDate(today.getDate() + 60);
+    return date >= today && date <= futureDate;
+  };
+
+  const navigateMonth = (direction: number) => {
+    setTimelineMonth(new Date(timelineMonth.getFullYear(), timelineMonth.getMonth() + direction, 1));
+  };
+
+  const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
+  const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
 
   const columns = [
     {
@@ -126,7 +203,7 @@ export const AssetDetailPanel: React.FC = () => {
           <button
             onClick={() => setActiveTab('info')}
             className={cn(
-              'flex-1 px-6 py-3 text-sm font-medium transition-colors relative',
+              'flex-1 px-4 py-3 text-sm font-medium transition-colors relative',
               activeTab === 'info' ? 'text-primary-600' : 'text-dark-500 hover:text-dark-700'
             )}
           >
@@ -136,9 +213,21 @@ export const AssetDetailPanel: React.FC = () => {
             )}
           </button>
           <button
+            onClick={() => setActiveTab('timeline')}
+            className={cn(
+              'flex-1 px-4 py-3 text-sm font-medium transition-colors relative',
+              activeTab === 'timeline' ? 'text-primary-600' : 'text-dark-500 hover:text-dark-700'
+            )}
+          >
+            占用时间轴
+            {activeTab === 'timeline' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />
+            )}
+          </button>
+          <button
             onClick={() => setActiveTab('history')}
             className={cn(
-              'flex-1 px-6 py-3 text-sm font-medium transition-colors relative',
+              'flex-1 px-4 py-3 text-sm font-medium transition-colors relative',
               activeTab === 'history' ? 'text-primary-600' : 'text-dark-500 hover:text-dark-700'
             )}
           >
@@ -150,7 +239,192 @@ export const AssetDetailPanel: React.FC = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {activeTab === 'info' ? (
+          {activeTab === 'timeline' ? (
+            <div className="p-6 space-y-6">
+              <div className="bg-white border border-dark-200 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h5 className="font-medium text-dark-800 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-primary-500" />
+                    未来占用日历（60天）
+                  </h5>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      icon={<ChevronLeft className="w-4 h-4" />}
+                      onClick={() => navigateMonth(-1)}
+                    />
+                    <span className="text-sm font-medium text-dark-700 min-w-[80px] text-center">
+                      {timelineMonth.getFullYear()}年 {monthNames[timelineMonth.getMonth()]}
+                    </span>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      icon={<ChevronRight className="w-4 h-4" />}
+                      onClick={() => navigateMonth(1)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-4 mb-3 text-xs">
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-success-500" />
+                    <span className="text-dark-600">空闲</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-primary-500" />
+                    <span className="text-dark-600">借用中</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-warning-500" />
+                    <span className="text-dark-600">待审批</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-danger-500" />
+                    <span className="text-dark-600">已逾期</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-dark-200" />
+                    <span className="text-dark-600">超出范围</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-7 gap-0.5 bg-dark-100 rounded-lg overflow-hidden">
+                  {weekDays.map((day, index) => (
+                    <div
+                      key={day}
+                      className={cn(
+                        'py-2 text-center text-xs font-medium bg-dark-50',
+                        index === 0 || index === 6 ? 'text-danger-500' : 'text-dark-600'
+                      )}
+                    >
+                      {day}
+                    </div>
+                  ))}
+                  {getDaysInMonth(timelineMonth).map(({ date, isCurrentMonth }, index) => {
+                    const dayOccupancy = getOccupancyForDate(date);
+                    const past = isPast(date);
+                    const withinRange = isWithin60Days(date);
+                    const today = isToday(date);
+
+                    return (
+                      <div
+                        key={index}
+                        className={cn(
+                          'min-h-[70px] p-1 bg-white relative transition-all',
+                          !isCurrentMonth && 'bg-dark-50',
+                          past && !today && 'bg-dark-50',
+                          !withinRange && !past && 'bg-dark-50/50'
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className={cn(
+                            'text-xs font-medium w-6 h-6 flex items-center justify-center rounded-full',
+                            !isCurrentMonth && 'text-dark-300',
+                            today && 'bg-primary-500 text-white',
+                            past && !today && !isCurrentMonth && 'text-dark-300',
+                            !withinRange && !past && !today && 'text-dark-300'
+                          )}>
+                            {date.getDate()}
+                          </span>
+                          {withinRange && dayOccupancy.length === 0 && !past && (
+                            <CheckCircle2 className="w-3 h-3 text-success-500" />
+                          )}
+                        </div>
+                        <div className="space-y-0.5 mt-1">
+                          {dayOccupancy.slice(0, 2).map((r, i) => (
+                            <div
+                              key={i}
+                              className={cn(
+                                'text-[10px] px-1 py-0.5 rounded truncate text-white cursor-pointer hover:opacity-80',
+                                r.status === 'approved' && 'bg-primary-500',
+                                r.status === 'pending' && 'bg-warning-500',
+                                r.status === 'overdue' && 'bg-danger-500'
+                              )}
+                              onClick={() => isAdmin && navigateToBorrowRecord(r.id)}
+                              title={isAdmin ? `点击查看详情 - ${r.userName} - ${r.purpose}` : `${r.userName} - ${r.purpose}`}
+                            >
+                              <div className="flex items-center gap-1">
+                                <span>{r.userName}</span>
+                                {isAdmin && <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />}
+                              </div>
+                            </div>
+                          ))}
+                          {dayOccupancy.length > 2 && (
+                            <div className="text-[10px] text-dark-500 text-center">
+                              +{dayOccupancy.length - 2}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {isAdmin && (
+                  <p className="mt-3 text-xs text-dark-500 flex items-center gap-1">
+                    <Info className="w-3 h-3" />
+                    管理员点击占用记录可跳转到审批归还页查看详情
+                  </p>
+                )}
+              </div>
+
+              <div className="bg-dark-50 rounded-lg p-4">
+                <h5 className="font-medium text-dark-800 mb-3 flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-primary-500" />
+                  未来60天占用列表
+                </h5>
+                {occupancy.length > 0 ? (
+                  <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
+                    {occupancy.map((record) => (
+                      <div
+                        key={record.id}
+                        className={cn(
+                          'p-3 rounded-lg border transition-all',
+                          record.status === 'approved' ? 'bg-primary-50 border-primary-200' :
+                          record.status === 'pending' ? 'bg-warning-50 border-warning-200' :
+                          'bg-danger-50 border-danger-200'
+                        )}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="font-medium text-dark-800">{record.userName}</p>
+                              <StatusBadge type="borrow" status={record.status} size="sm" />
+                            </div>
+                            <p className="text-xs text-dark-500 mb-1">
+                              {formatDate(record.borrowDate)} ~ {formatDate(record.expectedReturnDate)}
+                            </p>
+                            <p className="text-xs text-dark-600 truncate">用途: {record.purpose}</p>
+                          </div>
+                          {isAdmin && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              icon={<ExternalLink className="w-3.5 h-3.5" />}
+                              onClick={() => navigateToBorrowRecord(record.id)}
+                              className="flex-shrink-0 ml-2"
+                            >
+                              查看
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <CheckCircle2 className="w-12 h-12 text-success-400 mx-auto mb-2" />
+                    <p className="text-dark-500">未来60天内暂无占用记录</p>
+                    <p className="text-xs text-dark-400 mt-1">该资产当前处于空闲状态</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : activeTab === 'info' ? (
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-dark-50 rounded-lg p-4">

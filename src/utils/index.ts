@@ -54,6 +54,7 @@ interface StatusConfig {
   borrow: Record<string, StatusConfigItem>;
   damage: Record<string, StatusConfigItem>;
   role: Record<string, StatusConfigItem>;
+  reminder: Record<string, StatusConfigItem>;
 }
 
 export const statusConfig: StatusConfig = {
@@ -82,6 +83,11 @@ export const statusConfig: StatusConfig = {
     employee: { label: '普通员工', color: 'bg-dark-400' },
     admin: { label: '管理员', color: 'bg-primary-500' },
     approver: { label: '审批人', color: 'bg-success-500' },
+  },
+  reminder: {
+    pending: { label: '待发送', color: 'bg-warning-500' },
+    sent: { label: '已发送', color: 'bg-success-500' },
+    failed: { label: '发送失败', color: 'bg-danger-500' },
   },
 };
 

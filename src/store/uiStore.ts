@@ -8,9 +8,14 @@ interface UIState {
   showBorrowModal: boolean;
   showReturnModal: boolean;
   showAssetForm: boolean;
+  showReminderModal: boolean;
+  showReminderHistoryModal: boolean;
   editingAssetId: string | null;
   borrowModalAssetId: string | null;
   returnModalRecordId: string | null;
+  reminderModalRecordId: string | null;
+  reminderHistoryRecordId: string | null;
+  highlightedBorrowRecordId: string | null;
   toggleSidebar: () => void;
   setCurrentPage: (page: string) => void;
   openAssetDetail: (id: string) => void;
@@ -21,6 +26,11 @@ interface UIState {
   closeReturnModal: () => void;
   openAssetForm: (assetId?: string) => void;
   closeAssetForm: () => void;
+  openReminderModal: (recordId: string) => void;
+  closeReminderModal: () => void;
+  openReminderHistoryModal: (recordId: string) => void;
+  closeReminderHistoryModal: () => void;
+  navigateToBorrowRecord: (recordId: string) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -31,9 +41,14 @@ export const useUIStore = create<UIState>((set) => ({
   showBorrowModal: false,
   showReturnModal: false,
   showAssetForm: false,
+  showReminderModal: false,
+  showReminderHistoryModal: false,
   editingAssetId: null,
   borrowModalAssetId: null,
   returnModalRecordId: null,
+  reminderModalRecordId: null,
+  reminderHistoryRecordId: null,
+  highlightedBorrowRecordId: null,
 
   toggleSidebar: () => set(state => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   
@@ -54,4 +69,19 @@ export const useUIStore = create<UIState>((set) => ({
   openAssetForm: (assetId) => set({ showAssetForm: true, editingAssetId: assetId || null }),
   
   closeAssetForm: () => set({ showAssetForm: false, editingAssetId: null }),
+  
+  openReminderModal: (recordId) => set({ showReminderModal: true, reminderModalRecordId: recordId }),
+  
+  closeReminderModal: () => set({ showReminderModal: false, reminderModalRecordId: null }),
+  
+  openReminderHistoryModal: (recordId) => set({ showReminderHistoryModal: true, reminderHistoryRecordId: recordId }),
+  
+  closeReminderHistoryModal: () => set({ showReminderHistoryModal: false, reminderHistoryRecordId: null }),
+  
+  navigateToBorrowRecord: (recordId) => set({ 
+    currentPage: 'approval', 
+    showAssetDetail: false, 
+    activeAssetId: null,
+    highlightedBorrowRecordId: recordId 
+  }),
 }));
