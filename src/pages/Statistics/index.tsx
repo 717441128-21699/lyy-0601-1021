@@ -7,50 +7,120 @@ import { BarChart } from '@/components/charts/BarChart';
 import { PieChart } from '@/components/charts/PieChart';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { DataTable } from '@/components/ui/DataTable';
+import { Select } from '@/components/ui/Select';
+import { Button } from '@/components/ui/Button';
 import { formatDate, formatCurrency, cn } from '@/utils';
-import { Asset, BorrowRecord, Department } from '@/types';
+import { Asset, BorrowRecord } from '@/types';
 import {
   Package,
   HandCoins,
   AlertTriangle,
   Clock,
-  TrendingUp,
-  Users,
-  PieChart as PieChartIcon,
   Calendar,
   MapPin,
   User,
   DollarSign,
   AlertCircle,
-  CheckCircle,
+  RefreshCw,
+  Filter,
 } from 'lucide-react';
 
 const StatisticsPage: React.FC = () => {
   const { assets, categories } = useAssetStore();
-  const { records, getOverdueRecords } = useBorrowStore();
-  const { departments, users } = useUserStore();
+  const { records, getOverdueRecords, updateOverdueStatus } = useBorrowStore();
+  const { departments } = useUserStore();
+  const [selectedDepartment, setSelectedDepartment] = React.useState('');
+  const [selectedMonth, setSelectedMonth] = React.useState('');
+  const [isRefreshing, setIsRefreshing] = React.useState(false);
+
+  React.useEffect(() => {
+    updateOverdueStatus();
+  }, [updateOverdueStatus]);
+
+  const departmentOptions = [
+    { value: '', label: '全部部门' },
+    ...departments.map(d => ({ value: d.name, label: d.name })),
+  ];
+
+  const monthOptions = React.useMemo(() => {
+    const options: { value: string; label: string }[] = [
+      { value: '', label: '全部时间' },
+    ];
+    const now = new Date();
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${date.getFullYear()}年${date.getMonth() + 1}月`;
+      options.push({ value, label });
+    }
+    return options;
+  }, []);
+
+  const getFilteredRecords = React.useCallback(() => {
+    let filtered = [...records];
+    
+    if (selectedDepartment) {
+      filtered = filtered.filter(r => r.userDepartment === selectedDepartment);
+    }
+    
+    if (selectedMonth) {
+      const [year, month] = selectedMonth.split('-').map(Number);
+      const monthStart = new Date(year, month - 1, 1);
+      const monthEnd = new Date(year, month, 0);
+      const monthStartStr = formatDate(monthStart);
+      const monthEndStr = formatDate(monthEnd);
+      
+      filtered = filtered.filter(r => {
+        return r.createdAt >= monthStartStr && r.createdAt <= monthEndStr;
+      });
+    }
+    
+    return filtered;
+  }, [records, selectedDepartment, selectedMonth]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    updateOverdueStatus();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    setIsRefreshing(false);
+  };
+
+  const filteredRecords = getFilteredRecords();
 
   const totalAssets = assets.length;
   const availableAssets = assets.filter(a => a.status === 'available').length;
   const borrowedAssets = assets.filter(a => a.status === 'borrowed').length;
   const maintenanceAssets = assets.filter(a => a.status === 'maintenance').length;
-  const overdueRecords = getOverdueRecords();
-  const totalBorrowCount = records.filter(r => ['approved', 'returned', 'damaged'].includes(r.status)).length;
+
+  const allOverdueRecords = getOverdueRecords();
+  const overdueRecords = selectedDepartment 
+    ? allOverdueRecords.filter(r => r.userDepartment === selectedDepartment)
+    : allOverdueRecords;
+
+  const totalBorrowCount = filteredRecords.filter(r => 
+    ['approved', 'returned', 'damaged'].includes(r.status)
+  ).length;
 
   const monthlyTrend = React.useMemo(() => {
-    const months: string[] = [];
     const counts: { date: string; count: number }[] = [];
     const now = new Date();
     
     for (let i = 5; i >= 0; i--) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const monthStr = `${date.getMonth() + 1}月`;
-      months.push(monthStr);
       
       const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
       const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
       
-      const count = records.filter(r => {
+      let recordsToCount = filteredRecords;
+      if (!selectedMonth) {
+        recordsToCount = [...records];
+        if (selectedDepartment) {
+          recordsToCount = recordsToCount.filter(r => r.userDepartment === selectedDepartment);
+        }
+      }
+      
+      const count = recordsToCount.filter(r => {
         const created = new Date(r.createdAt);
         return created >= monthStart && created <= monthEnd && 
                ['approved', 'returned', 'damaged'].includes(r.status);
@@ -60,22 +130,33 @@ const StatisticsPage: React.FC = () => {
     }
     
     return counts;
-  }, [records]);
+  }, [records, filteredRecords, selectedDepartment, selectedMonth]);
 
   const departmentUsage = React.useMemo(() => {
     const deptMap = new Map<string, number>();
     
-    records.forEach(r => {
+    let recordsToUse = filteredRecords;
+    if (!selectedMonth && selectedDepartment) {
+      recordsToUse = records.filter(r => r.userDepartment === selectedDepartment);
+    } else if (!selectedMonth && !selectedDepartment) {
+      recordsToUse = records;
+    }
+    
+    recordsToUse.forEach(r => {
       if (['approved', 'returned', 'damaged'].includes(r.status)) {
         deptMap.set(r.userDepartment, (deptMap.get(r.userDepartment) || 0) + 1);
       }
     });
     
-    return departments.map(d => ({
+    const result = departments.map(d => ({
       name: d.name,
       value: deptMap.get(d.name) || 0,
     })).sort((a, b) => b.value - a.value).slice(0, 8);
-  }, [records, departments]);
+    
+    return selectedDepartment 
+      ? result.filter(d => d.name === selectedDepartment)
+      : result;
+  }, [records, filteredRecords, departments, selectedDepartment, selectedMonth]);
 
   const categoryDistribution = React.useMemo(() => {
     return categories.map(c => ({
@@ -85,26 +166,27 @@ const StatisticsPage: React.FC = () => {
   }, [assets, categories]);
 
   const idleAssets = React.useMemo(() => {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const daysAgo = selectedMonth ? 90 : 30;
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - daysAgo);
     
     const recentlyBorrowedAssetIds = new Set(
-      records
-        .filter(r => new Date(r.createdAt) >= thirtyDaysAgo)
+      filteredRecords
+        .filter(r => new Date(r.createdAt) >= thresholdDate)
         .map(r => r.assetId)
     );
     
     return assets.filter(
       a => a.status === 'available' && !recentlyBorrowedAssetIds.has(a.id)
     ).slice(0, 10);
-  }, [assets, records]);
+  }, [assets, filteredRecords, selectedMonth]);
 
   const damagedRecords = React.useMemo(() => {
-    return records
+    return filteredRecords
       .filter(r => r.damageLevel !== 'none' && r.damageLevel !== undefined)
       .sort((a, b) => new Date(b.actualReturnDate || b.createdAt).getTime() - new Date(a.actualReturnDate || a.createdAt).getTime())
       .slice(0, 10);
-  }, [records]);
+  }, [filteredRecords]);
 
   const overdueColumns = [
     {
@@ -303,12 +385,71 @@ const StatisticsPage: React.FC = () => {
     },
   ];
 
+  const filterSummary = React.useMemo(() => {
+    const parts: string[] = [];
+    if (selectedDepartment) {
+      parts.push(`部门：${selectedDepartment}`);
+    }
+    if (selectedMonth) {
+      const [year, month] = selectedMonth.split('-');
+      parts.push(`时间：${year}年${month}月`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : '全部数据';
+  }, [selectedDepartment, selectedMonth]);
+
   return (
     <PageContainer>
       <PageHeader
         title="统计中心"
         description="资产借用数据统计、分析和可视化展示"
-      />
+      >
+        <Button
+          variant="secondary"
+          icon={<RefreshCw className={cn('w-4 h-4', isRefreshing && 'animate-spin')} />}
+          onClick={handleRefresh}
+          loading={isRefreshing}
+        >
+          刷新数据
+        </Button>
+      </PageHeader>
+
+      <div className="bg-white rounded-xl shadow-card p-4 mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2 text-dark-600">
+            <Filter className="w-4 h-4" />
+            <span className="text-sm font-medium">筛选条件：</span>
+          </div>
+          <div className="w-48">
+            <Select
+              options={departmentOptions}
+              value={selectedDepartment}
+              onChange={(e) => setSelectedDepartment(e.target.value)}
+            />
+          </div>
+          <div className="w-48">
+            <Select
+              options={monthOptions}
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+            />
+          </div>
+          {(selectedDepartment || selectedMonth) && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setSelectedDepartment('');
+                setSelectedMonth('');
+              }}
+            >
+              清除筛选
+            </Button>
+          )}
+          <div className="ml-auto text-sm text-dark-500">
+            当前筛选：<span className="font-medium text-dark-700">{filterSummary}</span>
+          </div>
+        </div>
+      </div>
 
       <div className="grid grid-cols-4 gap-4 mb-6">
         <StatCard
@@ -321,7 +462,7 @@ const StatisticsPage: React.FC = () => {
           delay={0}
         />
         <StatCard
-          title="累计借用"
+          title={selectedMonth ? `当月借用` : '累计借用'}
           value={totalBorrowCount}
           icon={HandCoins}
           trend={12.3}
@@ -339,7 +480,7 @@ const StatisticsPage: React.FC = () => {
           delay={200}
         />
         <StatCard
-          title="闲置资产"
+          title={selectedMonth ? `当月闲置（90天）` : '闲置资产（30天）'}
           value={idleAssets.length}
           icon={Clock}
           trend={3.1}
@@ -413,8 +554,8 @@ const StatisticsPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
-        <LineChart data={monthlyTrend} title="借用趋势（近6个月）" height={300} />
-        <BarChart data={departmentUsage} title="部门使用排行" height={300} color="#10b981" />
+        <LineChart data={monthlyTrend} title={selectedDepartment ? `${selectedDepartment} - 借用趋势` : '借用趋势（近6个月）'} height={300} />
+        <BarChart data={departmentUsage} title={selectedDepartment ? `${selectedDepartment} - 使用统计` : '部门使用排行'} height={300} color="#10b981" />
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -457,7 +598,10 @@ const StatisticsPage: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-danger-500" />
-            <h3 className="text-lg font-semibold text-dark-800 font-display">逾期名单</h3>
+            <h3 className="text-lg font-semibold text-dark-800 font-display">
+              逾期名单
+              {selectedDepartment && <span className="text-sm font-normal text-dark-500 ml-2">（{selectedDepartment}）</span>}
+            </h3>
             {overdueRecords.length > 0 && (
               <span className="bg-danger-100 text-danger-600 px-2 py-0.5 rounded-full text-xs font-medium">
                 {overdueRecords.length} 项
@@ -470,7 +614,7 @@ const StatisticsPage: React.FC = () => {
           data={overdueRecords}
           pagination={false}
           rowId={(row) => row.id}
-          emptyText="暂无逾期记录"
+          emptyText={selectedDepartment ? `${selectedDepartment}暂无逾期记录` : '暂无逾期记录'}
         />
       </div>
 
@@ -479,7 +623,12 @@ const StatisticsPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-warning-500" />
-              <h3 className="text-lg font-semibold text-dark-800 font-display">闲置资产（30天未使用）</h3>
+              <h3 className="text-lg font-semibold text-dark-800 font-display">
+                闲置资产
+                <span className="text-sm font-normal text-dark-500 ml-2">
+                  （{selectedMonth ? '90天' : '30天'}未使用）
+                </span>
+              </h3>
             </div>
           </div>
           <DataTable
@@ -495,7 +644,10 @@ const StatisticsPage: React.FC = () => {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-5 h-5 text-danger-500" />
-              <h3 className="text-lg font-semibold text-dark-800 font-display">损坏记录</h3>
+              <h3 className="text-lg font-semibold text-dark-800 font-display">
+                损坏记录
+                {selectedDepartment && <span className="text-sm font-normal text-dark-500 ml-2">（{selectedDepartment}）</span>}
+              </h3>
             </div>
           </div>
           <DataTable
@@ -503,7 +655,7 @@ const StatisticsPage: React.FC = () => {
             data={damagedRecords}
             pagination={false}
             rowId={(row) => row.id}
-            emptyText="暂无损坏记录"
+            emptyText={selectedDepartment ? `${selectedDepartment}暂无损坏记录` : '暂无损坏记录'}
           />
         </div>
       </div>

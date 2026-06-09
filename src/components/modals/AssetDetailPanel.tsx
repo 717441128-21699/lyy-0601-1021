@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useUIStore, useAssetStore, useBorrowStore } from '@/store';
+import { useUIStore, useAssetStore, useBorrowStore, useUserStore } from '@/store';
 import { cn, formatDate, formatCurrency, getDaysRemaining, isOverdue } from '@/utils';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { Button } from '@/components/ui/Button';
@@ -15,14 +15,21 @@ import {
   HandCoins,
   History,
   AlertCircle,
+  AlertTriangle,
+  Eye,
+  Pencil,
 } from 'lucide-react';
 
 export const AssetDetailPanel: React.FC = () => {
   const { showAssetDetail, activeAssetId, closeAssetDetail, openBorrowModal, openAssetForm } = useUIStore();
   const { getAssetById } = useAssetStore();
   const { fetchRecords } = useBorrowStore();
+  const { currentUser } = useUserStore();
   const [activeTab, setActiveTab] = React.useState<'info' | 'history'>('info');
   const [borrowHistory, setBorrowHistory] = React.useState<any[]>([]);
+
+  const isAdmin = currentUser?.role === 'admin';
+  const canEdit = isAdmin;
 
   const asset = activeAssetId ? getAssetById(activeAssetId) : null;
 
@@ -252,27 +259,69 @@ export const AssetDetailPanel: React.FC = () => {
           )}
         </div>
 
+        {!canEdit && (
+          <div className="mx-6 mb-4 bg-primary-50 border border-primary-200 rounded-lg p-3">
+            <div className="flex items-start gap-2">
+              <Eye className="w-4 h-4 text-primary-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium text-primary-800">只读模式</p>
+                <p className="text-xs text-primary-600">
+                  您以普通员工身份登录，仅可查看资产详情和申请借用，如需修改请联系管理员。
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="p-6 border-t border-dark-100 flex gap-3 flex-shrink-0">
-          <Button
-            variant="secondary"
-            className="flex-1"
-            icon={<FileText className="w-4 h-4" />}
-            onClick={() => openAssetForm(asset.id)}
-          >
-            编辑资产
-          </Button>
-          {canBorrow && (
-            <Button
-              variant="primary"
-              className="flex-1"
-              icon={<HandCoins className="w-4 h-4" />}
-              onClick={() => {
-                closeAssetDetail();
-                openBorrowModal(asset.id);
-              }}
-            >
-              申请借用
-            </Button>
+          {canEdit ? (
+            <>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                icon={<Pencil className="w-4 h-4" />}
+                onClick={() => openAssetForm(asset.id)}
+              >
+                编辑资产
+              </Button>
+              {canBorrow && (
+                <Button
+                  variant="primary"
+                  className="flex-1"
+                  icon={<HandCoins className="w-4 h-4" />}
+                  onClick={() => {
+                    closeAssetDetail();
+                    openBorrowModal(asset.id);
+                  }}
+                >
+                  申请借用
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                icon={<Eye className="w-4 h-4" />}
+                disabled
+              >
+                仅可查看
+              </Button>
+              {canBorrow && (
+                <Button
+                  variant="primary"
+                  className="flex-1"
+                  icon={<HandCoins className="w-4 h-4" />}
+                  onClick={() => {
+                    closeAssetDetail();
+                    openBorrowModal(asset.id);
+                  }}
+                >
+                  申请借用
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>

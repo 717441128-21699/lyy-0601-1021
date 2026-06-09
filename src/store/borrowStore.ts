@@ -5,6 +5,20 @@ import { borrowRecords as mockRecords } from '@/data/mockData';
 import { useAssetStore } from './assetStore';
 import { useUserStore } from './userStore';
 
+interface OccupancyInfo {
+  id: string;
+  borrowDate: string;
+  expectedReturnDate: string;
+  status: string;
+  userName: string;
+  purpose: string;
+}
+
+interface ConflictInfo {
+  date: string;
+  records: BorrowRecord[];
+}
+
 interface BorrowState {
   records: BorrowRecord[];
   loading: boolean;
@@ -15,6 +29,9 @@ interface BorrowState {
   returnAsset: (id: string, data: ReturnAssetData) => void;
   getOverdueRecords: () => BorrowRecord[];
   getPendingCount: () => number;
+  getAssetOccupancy: (assetId: string) => OccupancyInfo[];
+  checkDateConflict: (assetId: string, borrowDate: string, expectedReturnDate: string, excludeRecordId?: string) => ConflictInfo[];
+  updateOverdueStatus: () => void;
 }
 
 const generateId = () => `bor-${Date.now().toString().slice(-6)}`;
@@ -176,6 +193,60 @@ export const useBorrowStore = create<BorrowState>()(
 
       getPendingCount: () => {
         return get().records.filter(r => r.status === 'pending').length;
+      },
+
+      getAssetOccupancy: (assetId: string) => {
+        return get().records.filter(
+          r => r.assetId === assetId && ['pending', 'approved', 'overdue'].includes(r.status)
+        ).map(r => ({
+          id: r.id,
+          borrowDate: r.borrowDate,
+          expectedReturnDate: r.expectedReturnDate,
+          status: r.status,
+          userName: r.userName,
+          purpose: r.purpose,
+        }));
+      },
+
+      checkDateConflict: (assetId: string, borrowDate: string, expectedReturnDate: string, excludeRecordId?: string) => {
+        const occupancy = get().records.filter(
+          r => r.assetId === assetId && 
+               ['pending', 'approved', 'overdue'].includes(r.status) &&
+               r.id !== excludeRecordId
+        );
+
+        const conflicts: { date: string; records: typeof occupancy }[] = [];
+        
+        const start = new Date(borrowDate);
+        const end = new Date(expectedReturnDate);
+        
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().split('T')[0];
+          const dayConflicts = occupancy.filter(r => {
+            return r.borrowDate <= dateStr && r.expectedReturnDate >= dateStr;
+          });
+          
+          if (dayConflicts.length > 0) {
+            conflicts.push({
+              date: dateStr,
+              records: dayConflicts,
+            });
+          }
+        }
+
+        return conflicts;
+      },
+
+      updateOverdueStatus: () => {
+        const today = new Date().toISOString().split('T')[0];
+        set(state => ({
+          records: state.records.map(r => {
+            if (r.status === 'approved' && r.expectedReturnDate < today) {
+              return { ...r, status: 'overdue' as BorrowStatus };
+            }
+            return r;
+          }),
+        }));
       },
     }),
     {

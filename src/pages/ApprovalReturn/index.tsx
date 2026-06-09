@@ -20,8 +20,7 @@ import {
   PackageCheck,
   AlertTriangle,
   ScanLine,
-  Filter,
-  ChevronDown,
+  AlertCircle,
 } from 'lucide-react';
 
 type TabMode = 'pending' | 'borrowed' | 'returned';
@@ -37,7 +36,7 @@ const statusOptions: { value: BorrowStatus | 'all'; label: string }[] = [
 ];
 
 const ApprovalReturnPage: React.FC = () => {
-  const { records, fetchRecords, approveBorrow, rejectBorrow, loading } = useBorrowStore();
+  const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus } = useBorrowStore();
   const { openReturnModal } = useUIStore();
   const { currentUser } = useUserStore();
   const [activeTab, setActiveTab] = React.useState<TabMode>('pending');
@@ -50,45 +49,66 @@ const ApprovalReturnPage: React.FC = () => {
   const [submitting, setSubmitting] = React.useState(false);
 
   const isApprover = currentUser?.role === 'approver' || currentUser?.role === 'admin';
+  const isEmployee = currentUser?.role === 'employee';
+
+  React.useEffect(() => {
+    updateOverdueStatus();
+  }, [updateOverdueStatus]);
 
   React.useEffect(() => {
     const filters: any = {};
     if (keyword) filters.keyword = keyword;
     if (statusFilter && statusFilter !== 'all') filters.status = statusFilter;
     
+    if (isEmployee && currentUser) {
+      filters.userId = currentUser.id;
+    }
+    
     if (activeTab === 'pending') {
       filters.status = 'pending';
     } else if (activeTab === 'borrowed') {
-      filters.status = 'approved';
     } else if (activeTab === 'returned') {
-      // 已归还包含 returned、damaged、rejected
     }
     
     fetchRecords(filters).then(data => {
-      if (activeTab === 'returned') {
+      if (activeTab === 'borrowed') {
+        data = data.filter(r => ['approved', 'overdue'].includes(r.status));
+      } else if (activeTab === 'returned') {
         data = data.filter(r => ['returned', 'damaged', 'rejected'].includes(r.status));
+      } else if (activeTab === 'pending') {
+        data = data.filter(r => r.status === 'pending');
       }
       setFilteredRecords(data);
     });
-  }, [keyword, statusFilter, activeTab, fetchRecords]);
+  }, [keyword, statusFilter, activeTab, fetchRecords, isEmployee, currentUser]);
 
-  const pendingCount = records.filter(r => r.status === 'pending').length;
-  const borrowedCount = records.filter(r => r.status === 'approved').length;
-  const returnedCount = records.filter(r => ['returned', 'damaged'].includes(r.status)).length;
-  const overdueCount = records.filter(r => r.status === 'overdue').length;
+  const getCountByStatus = (status: BorrowStatus | BorrowStatus[], forCurrentUser = false) => {
+    return records.filter(r => {
+      const statusMatch = Array.isArray(status) ? status.includes(r.status) : r.status === status;
+      const userMatch = forCurrentUser && currentUser ? r.userId === currentUser.id : true;
+      return statusMatch && userMatch;
+    }).length;
+  };
+
+  const pendingCount = getCountByStatus('pending', isEmployee);
+  const borrowedCount = getCountByStatus(['approved', 'overdue'], isEmployee);
+  const returnedCount = getCountByStatus(['returned', 'damaged'], isEmployee);
+  const overdueCount = getCountByStatus('overdue', isEmployee);
 
   const handleSelectRow = (id: string, selected: boolean) => {
+    if (!isApprover) return;
     setSelectedRows(prev => 
       selected ? [...prev, id] : prev.filter(rowId => rowId !== id)
     );
   };
 
   const handleSelectAll = (selected: boolean) => {
+    if (!isApprover) return;
     setSelectedRows(selected ? filteredRecords.map(r => r.id) : []);
   };
 
   const handleApprove = async () => {
-    if (selectedRows.length === 0) return;
+    if (selectedRows.length === 0 || !isApprover) return;
     setSubmitting(true);
     await new Promise(resolve => setTimeout(resolve, 500));
     approveBorrow(selectedRows);
@@ -97,12 +117,12 @@ const ApprovalReturnPage: React.FC = () => {
   };
 
   const handleReject = () => {
-    if (selectedRows.length === 0) return;
+    if (selectedRows.length === 0 || !isApprover) return;
     setShowRejectModal(true);
   };
 
   const confirmReject = async () => {
-    if (!rejectReason.trim()) return;
+    if (!rejectReason.trim() || !isApprover) return;
     setSubmitting(true);
     await new Promise(resolve => setTimeout(resolve, 500));
     rejectBorrow(selectedRows, rejectReason.trim());
@@ -145,6 +165,12 @@ const ApprovalReturnPage: React.FC = () => {
           <div className="text-xs text-dark-400 mt-1">
             至 {formatDate(record.expectedReturnDate)}
           </div>
+          {record.status === 'overdue' && (
+            <div className="text-xs text-danger-500 mt-1 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              已逾期
+            </div>
+          )}
         </div>
       ),
     },
@@ -175,7 +201,7 @@ const ApprovalReturnPage: React.FC = () => {
 
   const pendingColumns = [
     ...baseColumns,
-    {
+    ...(isApprover ? [{
       key: 'actions',
       header: '操作',
       accessor: (record: BorrowRecord) => (
@@ -205,7 +231,7 @@ const ApprovalReturnPage: React.FC = () => {
           </Button>
         </div>
       ),
-    },
+    }] : []),
   ];
 
   const borrowedColumns = [
@@ -217,23 +243,26 @@ const ApprovalReturnPage: React.FC = () => {
         <p className="text-sm text-dark-600">{record.approverName}</p>
       ),
     },
-    {
+    ...(isApprover || isEmployee ? [{
       key: 'actions',
       header: '操作',
-      accessor: (record: BorrowRecord) => (
-        <Button
-          size="sm"
-          variant="primary"
-          icon={<ScanLine className="w-4 h-4" />}
-          onClick={(e: React.MouseEvent) => {
-            e.stopPropagation();
-            openReturnModal(record.id);
-          }}
-        >
-          归还
-        </Button>
-      ),
-    },
+      accessor: (record: BorrowRecord) => {
+        const canReturn = isApprover || (isEmployee && currentUser && record.userId === currentUser.id);
+        return canReturn ? (
+          <Button
+            size="sm"
+            variant={record.status === 'overdue' ? 'danger' : 'primary'}
+            icon={<ScanLine className="w-4 h-4" />}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              openReturnModal(record.id);
+            }}
+          >
+            {record.status === 'overdue' ? '逾期归还' : '归还'}
+          </Button>
+        ) : null;
+      },
+    }] : []),
   ];
 
   const returnedColumns = [
@@ -251,6 +280,18 @@ const ApprovalReturnPage: React.FC = () => {
       key: 'damageLevel',
       header: '损坏情况',
       accessor: (record: BorrowRecord) => {
+        if (record.status === 'rejected') {
+          return (
+            <div className="text-sm">
+              <p className="text-danger-600">已驳回</p>
+              {record.damageNote && (
+                <p className="text-xs text-dark-500 mt-1" title={record.damageNote}>
+                  原因: {record.damageNote}
+                </p>
+              )}
+            </div>
+          );
+        }
         if (record.damageLevel === 'none') {
           return <span className="text-sm text-success-600">完好无损</span>;
         }
@@ -286,8 +327,26 @@ const ApprovalReturnPage: React.FC = () => {
     <PageContainer>
       <PageHeader
         title="审批归还"
-        description="处理借用申请、审批管理、资产归还登记"
+        description={
+          isEmployee 
+            ? "查看我的借用记录和归还资产"
+            : "处理借用申请、审批管理、资产归还登记"
+        }
       />
+
+      {isEmployee && (
+        <div className="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-primary-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-primary-800">员工视图</p>
+              <p className="text-sm text-primary-600 mt-1">
+                当前您以普通员工身份登录，仅可查看和管理自己的借用记录。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-4 gap-4 mb-6">
         <div className="bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl p-4 text-white">
@@ -303,7 +362,7 @@ const ApprovalReturnPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-white/80">借用中</p>
-              <p className="text-2xl font-bold mt-1">{borrowedCount}</p>
+              <p className="text-2xl font-bold mt-1">{borrowedCount - overdueCount}</p>
             </div>
             <User className="w-10 h-10 text-white/30" />
           </div>
@@ -362,6 +421,11 @@ const ApprovalReturnPage: React.FC = () => {
               {borrowedCount}
             </span>
           )}
+          {overdueCount > 0 && (
+            <span className="bg-danger-500 text-white px-2 py-0.5 rounded-full text-xs">
+              逾期{overdueCount}
+            </span>
+          )}
         </button>
         <button
           onClick={() => { setActiveTab('returned'); setSelectedRows([]); }}
@@ -387,7 +451,7 @@ const ApprovalReturnPage: React.FC = () => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onSearch={setKeyword}
-              placeholder="搜索资产名称、申请人、用途..."
+              placeholder={isEmployee ? "搜索我的资产名称、用途..." : "搜索资产名称、申请人、用途..."}
             />
           </div>
           <div className="w-40">
@@ -424,6 +488,20 @@ const ApprovalReturnPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {activeTab === 'borrowed' && overdueCount > 0 && (
+        <div className="bg-danger-50 border border-danger-200 rounded-lg p-4 mb-6">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-danger-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium text-danger-800">逾期提醒</p>
+              <p className="text-sm text-danger-600 mt-1">
+                当前有 {overdueCount} 项借用已逾期未归还，请尽快处理。
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-xl shadow-card overflow-hidden">
         <DataTable
