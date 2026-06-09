@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useBorrowStore, useUIStore, useUserStore, useAssetStore } from '@/store';
 import { PageContainer, PageHeader } from '@/components/Layout/PageContainer';
 import { SearchInput } from '@/components/ui/Input';
@@ -45,8 +46,9 @@ const statusOptions: { value: BorrowStatus | 'all'; label: string }[] = [
 ];
 
 const ApprovalReturnPage: React.FC = () => {
+  const navigate = useNavigate();
   const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus, getRemindersForRecord, getRecordById, getBatches, getBatchRecords, getBatchById } = useBorrowStore();
-  const { openReturnModal, openReminderModal, openReminderHistoryModal, highlightedBorrowRecordId, previousAssetDetailId, navigateBackToAssetDetail, clearHighlightedRecord } = useUIStore();
+  const { openReturnModal, openReminderModal, openReminderHistoryModal, highlightedBorrowRecordId, previousAssetDetailId, navigateBackToAssetDetail, clearHighlightedRecord, selectedBatchId, setSelectedBatchId } = useUIStore();
   const { currentUser } = useUserStore();
   const { getAssetById } = useAssetStore();
   const [activeTab, setActiveTab] = React.useState<TabMode>('pending');
@@ -55,7 +57,7 @@ const ApprovalReturnPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = React.useState<BorrowStatus | 'all'>('all');
   const [filteredRecords, setFilteredRecords] = React.useState<BorrowRecord[]>([]);
   const [filteredBatches, setFilteredBatches] = React.useState<any[]>([]);
-  const [selectedBatchId, setSelectedBatchId] = React.useState<string | null>(null);
+  const [selectedBatchIdLocal, setSelectedBatchIdLocal] = React.useState<string | null>(null);
   const [selectedRows, setSelectedRows] = React.useState<string[]>([]);
   const [showRejectModal, setShowRejectModal] = React.useState(false);
   const [rejectReason, setRejectReason] = React.useState('');
@@ -80,6 +82,7 @@ const ApprovalReturnPage: React.FC = () => {
           targetTab = 'returned';
         }
         setActiveTab(targetTab);
+        setViewMode('record');
         
         const asset = getAssetById(record.assetId);
         setHighlightMessage(
@@ -92,6 +95,24 @@ const ApprovalReturnPage: React.FC = () => {
       }
     }
   }, [highlightedBorrowRecordId, getRecordById, getAssetById]);
+
+  React.useEffect(() => {
+    if (selectedBatchId) {
+      setViewMode('batch');
+      setSelectedBatchIdLocal(selectedBatchId);
+      
+      const batch = getBatchById(selectedBatchId);
+      if (batch) {
+        setHighlightMessage(
+          `已定位到会议批次：${batch.purpose}`
+        );
+        
+        setTimeout(() => {
+          setHighlightMessage(null);
+        }, 5000);
+      }
+    }
+  }, [selectedBatchId, getBatchById]);
 
   React.useEffect(() => {
     const filters: any = {};
@@ -183,22 +204,28 @@ const ApprovalReturnPage: React.FC = () => {
     setSelectedRows(selected ? filteredRecords.map(r => r.id) : []);
   };
 
-  const handleApprove = async () => {
-    if (selectedRows.length === 0 || !isApprover) return;
+  const handleApprove = async (ids?: string[]) => {
+    const recordIds = ids || selectedRows;
+    if (recordIds.length === 0 || !isApprover) return;
     setSubmitting(true);
     await new Promise(resolve => setTimeout(resolve, 500));
-    approveBorrow(selectedRows);
+    approveBorrow(recordIds);
     setSelectedRows([]);
     setSubmitting(false);
+    fetchFilteredRecords();
   };
 
-  const handleReject = () => {
-    if (selectedRows.length === 0 || !isApprover) return;
+  const handleReject = (ids?: string[]) => {
+    const recordIds = ids || selectedRows;
+    if (recordIds.length === 0 || !isApprover) return;
+    if (ids) {
+      setSelectedRows(ids);
+    }
     setShowRejectModal(true);
   };
 
   const confirmReject = async () => {
-    if (!rejectReason.trim() || !isApprover) return;
+    if (!rejectReason.trim() || selectedRows.length === 0 || !isApprover) return;
     setSubmitting(true);
     await new Promise(resolve => setTimeout(resolve, 500));
     rejectBorrow(selectedRows, rejectReason.trim());
@@ -206,6 +233,32 @@ const ApprovalReturnPage: React.FC = () => {
     setRejectReason('');
     setShowRejectModal(false);
     setSubmitting(false);
+    fetchFilteredRecords();
+  };
+
+  const fetchFilteredRecords = () => {
+    const filters: any = {};
+    if (keyword) filters.keyword = keyword;
+    if (statusFilter && statusFilter !== 'all') filters.status = statusFilter;
+    
+    if (isEmployee && currentUser) {
+      filters.userId = currentUser.id;
+    }
+    
+    if (activeTab === 'pending') {
+      filters.status = 'pending';
+    }
+    
+    fetchRecords(filters).then(data => {
+      if (activeTab === 'borrowed') {
+        data = data.filter(r => ['approved', 'overdue'].includes(r.status));
+      } else if (activeTab === 'returned') {
+        data = data.filter(r => ['returned', 'damaged', 'rejected'].includes(r.status));
+      } else if (activeTab === 'pending') {
+        data = data.filter(r => r.status === 'pending');
+      }
+      setFilteredRecords(data);
+    });
   };
 
   const baseColumns = [
@@ -455,6 +508,11 @@ const ApprovalReturnPage: React.FC = () => {
     }, 3000);
   };
 
+  const handleNavigateBackToAsset = () => {
+    navigateBackToAssetDetail();
+    navigate('/assets');
+  };
+
   return (
     <PageContainer>
       {highlightMessage && (
@@ -483,7 +541,7 @@ const ApprovalReturnPage: React.FC = () => {
           <Button
             variant="secondary"
             icon={<ArrowLeft className="w-4 h-4" />}
-            onClick={navigateBackToAssetDetail}
+            onClick={handleNavigateBackToAsset}
             className="flex-shrink-0"
           >
             返回资产详情
@@ -679,7 +737,7 @@ const ApprovalReturnPage: React.FC = () => {
                 variant="success"
                 size="sm"
                 icon={<CheckCircle className="w-4 h-4" />}
-                onClick={handleApprove}
+                onClick={() => handleApprove()}
                 loading={submitting}
               >
                 批量同意
@@ -688,7 +746,7 @@ const ApprovalReturnPage: React.FC = () => {
                 variant="danger"
                 size="sm"
                 icon={<XCircle className="w-4 h-4" />}
-                onClick={handleReject}
+                onClick={() => handleReject()}
                 loading={submitting}
               >
                 批量驳回
@@ -735,17 +793,17 @@ const ApprovalReturnPage: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {selectedBatchId ? (
+          {selectedBatchIdLocal ? (
             <BatchDetailView
-              batchId={selectedBatchId}
-              onBack={() => setSelectedBatchId(null)}
+              batchId={selectedBatchIdLocal}
+              onBack={() => {
+                setSelectedBatchIdLocal(null);
+                setSelectedBatchId(null);
+              }}
               activeTab={activeTab}
               isApprover={isApprover}
               handleApprove={handleApprove}
-              handleRejectSingle={(id) => {
-                setSelectedRows([id]);
-                setShowRejectModal(true);
-              }}
+              handleRejectSingle={handleReject}
               openReturnModal={openReturnModal}
               openReminderModal={openReminderModal}
               openReminderHistoryModal={openReminderHistoryModal}
@@ -767,7 +825,10 @@ const ApprovalReturnPage: React.FC = () => {
                     <div
                       key={batch.batchId}
                       className="p-4 hover:bg-dark-50 cursor-pointer transition-colors"
-                      onClick={() => setSelectedBatchId(batch.batchId)}
+                      onClick={() => {
+                        setSelectedBatchIdLocal(batch.batchId);
+                        setSelectedBatchId(null);
+                      }}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
@@ -922,8 +983,8 @@ interface BatchDetailViewProps {
   onBack: () => void;
   activeTab: TabMode;
   isApprover: boolean;
-  handleApprove: (ids: string[]) => void;
-  handleRejectSingle: (id: string) => void;
+  handleApprove: (ids?: string[]) => void;
+  handleRejectSingle: (id?: string | string[]) => void;
   openReturnModal: (id: string) => void;
   openReminderModal: (id: string) => void;
   openReminderHistoryModal: (id: string) => void;

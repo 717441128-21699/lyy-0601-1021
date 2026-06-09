@@ -113,17 +113,15 @@ export const ReminderHistoryModal: React.FC = () => {
               <div className="w-40">
                 <Select
                   value={filterMethod}
-                  onChange={(v) => setFilterMethod(v as any)}
+                  onChange={(e) => setFilterMethod(e.target.value as ReminderMethod | 'all')}
                   options={methodOptions}
-                  size="sm"
                 />
               </div>
               <div className="w-40">
                 <Select
                   value={filterRemindedBy}
-                  onChange={(v) => setFilterRemindedBy(v as string)}
+                  onChange={(e) => setFilterRemindedBy(e.target.value)}
                   options={userOptions}
-                  size="sm"
                 />
               </div>
             </div>

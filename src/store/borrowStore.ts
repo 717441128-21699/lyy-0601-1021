@@ -616,19 +616,42 @@ export const useBorrowStore = create<BorrowState>()(
         }
         
         const { assets } = useAssetStore.getState();
-        const idleAssets = assets.filter(a => a.status === 'available').map(asset => {
-          const lastBorrow = get().records
-            .filter(r => r.assetId === asset.id && r.status !== 'rejected')
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+        const { users } = useUserStore.getState();
+        
+        let candidateAssets = assets.filter(a => a.status === 'available');
+        
+        if (department) {
+          const deptManagerIds = new Set(
+            users.filter(u => u.departmentName === department).map(u => u.id)
+          );
+          candidateAssets = candidateAssets.filter(a => 
+            deptManagerIds.has(a.managerId)
+          );
+        }
+        
+        const idleAssets = candidateAssets.map(asset => {
+          let borrowRecords = get().records
+            .filter(r => r.assetId === asset.id && r.status !== 'rejected');
           
-          let daysIdle = 30;
+          if (department) {
+            borrowRecords = borrowRecords.filter(r => r.userDepartment === department);
+          }
+          
+          borrowRecords = borrowRecords.sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          
+          const lastBorrow = borrowRecords[0];
+          
+          let daysIdle = 90;
           if (lastBorrow) {
             const lastDate = lastBorrow.actualReturnDate || lastBorrow.expectedReturnDate;
-            daysIdle = Math.floor((new Date(today).getTime() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
+            const referenceDate = monthEnd;
+            daysIdle = Math.floor((referenceDate.getTime() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
           }
           
           return { asset, daysIdle: Math.max(0, daysIdle) };
-        }).filter(i => i.daysIdle >= 7).sort((a, b) => b.daysIdle - a.daysIdle);
+        }).filter(i => i.daysIdle >= 30).sort((a, b) => b.daysIdle - a.daysIdle);
         
         return { borrowTrend, departmentUsage, overdueList, idleAssets };
       },

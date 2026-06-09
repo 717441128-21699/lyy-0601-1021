@@ -17,6 +17,7 @@ interface UIState {
   reminderHistoryRecordId: string | null;
   highlightedBorrowRecordId: string | null;
   previousAssetDetailId: string | null;
+  selectedBatchId: string | null;
   toggleSidebar: () => void;
   setCurrentPage: (page: string) => void;
   openAssetDetail: (id: string) => void;
@@ -34,6 +35,7 @@ interface UIState {
   navigateToBorrowRecord: (recordId: string, assetId?: string) => void;
   navigateBackToAssetDetail: () => void;
   clearHighlightedRecord: () => void;
+  setSelectedBatchId: (batchId: string | null) => void;
 }
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -53,6 +55,7 @@ export const useUIStore = create<UIState>((set, get) => ({
   reminderHistoryRecordId: null,
   highlightedBorrowRecordId: null,
   previousAssetDetailId: null,
+  selectedBatchId: null,
 
   toggleSidebar: () => set(state => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   
@@ -93,6 +96,10 @@ export const useUIStore = create<UIState>((set, get) => ({
     });
   },
   
+  clearHighlightedRecord: () => set({ highlightedBorrowRecordId: null }),
+  
+  setSelectedBatchId: (batchId) => set({ selectedBatchId: batchId }),
+  
   navigateBackToAssetDetail: () => {
     const state = get();
     if (state.previousAssetDetailId) {
@@ -102,14 +109,14 @@ export const useUIStore = create<UIState>((set, get) => ({
         showAssetDetail: true,
         highlightedBorrowRecordId: null,
         previousAssetDetailId: null,
+        selectedBatchId: null,
       });
     } else {
       set({
         currentPage: 'assets',
         highlightedBorrowRecordId: null,
+        selectedBatchId: null,
       });
     }
   },
-  
-  clearHighlightedRecord: () => set({ highlightedBorrowRecordId: null }),
 }));

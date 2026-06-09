@@ -1,11 +1,12 @@
 import * as React from 'react';
-import { useAssetStore, useBorrowStore } from '@/store';
+import { useNavigate } from 'react-router-dom';
+import { useAssetStore, useBorrowStore, useUIStore } from '@/store';
 import { PageContainer, PageHeader } from '@/components/Layout/PageContainer';
 import { Select } from '@/components/ui/Select';
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { cn, formatDate } from '@/utils';
-import { Asset, BorrowRecord, CalendarView } from '@/types';
+import { Asset, BorrowRecord, CalendarView, BatchConflictInfo } from '@/types';
 import {
   Calendar,
   ChevronLeft,
@@ -17,11 +18,18 @@ import {
   LayoutGrid,
   List,
   MapPin,
+  Layers,
+  ExternalLink,
+  Users,
+  Package,
+  AlertCircle,
 } from 'lucide-react';
 
 const CalendarBoardPage: React.FC = () => {
+  const navigate = useNavigate();
   const { assets, categories, fetchAssets } = useAssetStore();
-  const { records, fetchRecords } = useBorrowStore();
+  const { records, fetchRecords, getBatches, checkBatchConflicts } = useBorrowStore();
+  const { navigateToBorrowRecord, setSelectedBatchId } = useUIStore();
   const [viewMode, setViewMode] = React.useState<CalendarView>('month');
   const [currentDate, setCurrentDate] = React.useState(new Date());
   const [selectedAssetId, setSelectedAssetId] = React.useState('');
@@ -30,6 +38,8 @@ const CalendarBoardPage: React.FC = () => {
   const [activeRecords, setActiveRecords] = React.useState<BorrowRecord[]>([]);
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
   const [selectedRecord, setSelectedRecord] = React.useState<BorrowRecord | null>(null);
+  const { selectedBatchId } = useUIStore();
+  const [batchConflicts, setBatchConflicts] = React.useState<BatchConflictInfo[]>([]);
 
   React.useEffect(() => {
     const filters: any = {};
@@ -46,6 +56,14 @@ const CalendarBoardPage: React.FC = () => {
       setActiveRecords(filtered);
     });
   }, [selectedAssetId, fetchRecords, records]);
+
+  React.useEffect(() => {
+    if (viewMode === 'batch') {
+      const monthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+      const conflicts = checkBatchConflicts(monthStr);
+      setBatchConflicts(conflicts);
+    }
+  }, [viewMode, currentDate, checkBatchConflicts]);
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
@@ -145,6 +163,16 @@ const CalendarBoardPage: React.FC = () => {
       case 'overdue': return 'bg-danger-500';
       default: return 'bg-dark-500';
     }
+  };
+
+  const handleNavigateToApproval = (batchId: string) => {
+    setSelectedBatchId(batchId);
+    navigate('/approval');
+  };
+
+  const handleNavigateToRecord = (recordId: string, assetId: string) => {
+    navigateToBorrowRecord(recordId, assetId);
+    navigate('/approval');
   };
 
   const renderMonthView = () => {
@@ -385,6 +413,236 @@ const CalendarBoardPage: React.FC = () => {
     );
   };
 
+  const renderBatchView = () => {
+    const monthStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+    const batches = getBatches({ month: monthStr });
+    
+    const conflictMap = new Map<string, BatchConflictInfo[]>();
+    batchConflicts.forEach(conflict => {
+      const key = `${conflict.date}-${conflict.assetId}`;
+      if (!conflictMap.has(key)) {
+        conflictMap.set(key, []);
+      }
+      conflictMap.get(key)!.push(conflict);
+    });
+
+    const hasBatchConflict = (batchId: string) => {
+      return batchConflicts.some(c => c.batchId === batchId);
+    };
+
+    return (
+      <div className="space-y-6">
+        {batchConflicts.length > 0 && (
+          <div className="bg-danger-50 border border-danger-200 rounded-xl p-4">
+            <div className="flex items-center gap-3 mb-3">
+              <AlertTriangle className="w-5 h-5 text-danger-500 flex-shrink-0" />
+              <div>
+                <h4 className="font-semibold text-danger-800">跨批次占用冲突预警</h4>
+                <p className="text-sm text-danger-600 mt-0.5">
+                  发现 {new Set(batchConflicts.map(c => c.date + c.assetId)).size} 个冲突点，涉及 {new Set(batchConflicts.map(c => c.batchId)).size} 个批次
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Array.from(conflictMap.entries()).slice(0, 6).map(([key, conflicts]) => {
+                const [date, assetId] = key.split('-');
+                const asset = assets.find(a => a.id === assetId);
+                return (
+                  <div
+                    key={key}
+                    className="bg-white border border-danger-200 rounded-lg p-3"
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-danger-700 flex items-center gap-1">
+                        <AlertCircle className="w-4 h-4" />
+                        {date}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<ExternalLink className="w-3 h-3" />}
+                        onClick={() => handleNavigateToApproval(conflicts[0].batchId)}
+                      >
+                        处理
+                      </Button>
+                    </div>
+                    <p className="text-sm text-dark-700 font-medium mb-2">
+                      {asset?.name || conflicts[0].assetName}
+                    </p>
+                    <div className="space-y-1">
+                      {conflicts.map((c, i) => (
+                        <div
+                          key={i}
+                          className="text-xs text-dark-600 flex items-center justify-between"
+                        >
+                          <span className="truncate">
+                            {c.batchPurpose} - {c.userName}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="text-xs h-6 px-2 py-0"
+                            onClick={() => handleNavigateToRecord(
+                              getBatchRecords(c.batchId).find(r => r.assetId === assetId)?.id || '',
+                              assetId
+                            )}
+                          >
+                            查看
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl shadow-card overflow-hidden">
+          <div className="p-4 border-b border-dark-100 bg-dark-50">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-dark-800 flex items-center gap-2">
+                <Layers className="w-5 h-5 text-primary-500" />
+                会议批次列表
+                <span className="text-sm font-normal text-dark-500">
+                  ({monthNames[currentDate.getMonth()]}月，共 {batches.length} 个批次)
+                </span>
+              </h3>
+            </div>
+          </div>
+
+          {batches.length === 0 ? (
+            <div className="py-12 text-center text-dark-500">
+              <Layers className="w-12 h-12 mx-auto mb-3 text-dark-300" />
+              <p>当月暂无会议批次</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-dark-100">
+              {batches.map(batch => {
+                const hasConflict = hasBatchConflict(batch.batchId);
+                const pendingCount = batch.records.filter(r => r.status === 'pending').length;
+                const approvedCount = batch.records.filter(r => ['approved', 'overdue'].includes(r.status)).length;
+                const rejectedCount = batch.records.filter(r => r.status === 'rejected').length;
+                const returnedCount = batch.records.filter(r => ['returned', 'damaged'].includes(r.status)).length;
+
+                return (
+                  <div
+                    key={batch.batchId}
+                    className={cn(
+                      'p-4 hover:bg-dark-50 transition-colors',
+                      hasConflict && 'bg-danger-50/30'
+                    )}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h4 className="font-semibold text-dark-800">{batch.purpose}</h4>
+                          {hasConflict && (
+                            <span className="flex items-center gap-1 text-xs bg-danger-100 text-danger-700 px-2 py-0.5 rounded-full">
+                              <AlertTriangle className="w-3 h-3" />
+                              存在冲突
+                            </span>
+                          )}
+                          <span className="text-xs bg-dark-100 text-dark-600 px-2 py-0.5 rounded-full">
+                            {batch.records.length} 件资产
+                          </span>
+                        </div>
+                        
+                        <div className="flex items-center gap-4 text-sm text-dark-500 mb-3">
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3.5 h-3.5" />
+                            {batch.userName} · {batch.userDepartment}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5" />
+                            {formatDate(batch.borrowDate)} ~ {formatDate(batch.expectedReturnDate)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            申请时间: {formatDate(batch.createdAt)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          {pendingCount > 0 && (
+                            <span className="text-xs bg-warning-100 text-warning-700 px-2 py-0.5 rounded-full">
+                              待审批 {pendingCount}
+                            </span>
+                          )}
+                          {approvedCount > 0 && (
+                            <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">
+                              借用中 {approvedCount}
+                            </span>
+                          )}
+                          {rejectedCount > 0 && (
+                            <span className="text-xs bg-danger-100 text-danger-700 px-2 py-0.5 rounded-full">
+                              已驳回 {rejectedCount}
+                            </span>
+                          )}
+                          {returnedCount > 0 && (
+                            <span className="text-xs bg-success-100 text-success-700 px-2 py-0.5 rounded-full">
+                              已归还 {returnedCount}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                          {batch.records.slice(0, 5).map((record, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center gap-1.5 bg-dark-50 rounded-lg px-2 py-1"
+                            >
+                              <Package className="w-3.5 h-3.5 text-dark-400" />
+                              <span className="text-xs text-dark-600 truncate max-w-[120px]">
+                                {record.assetName}
+                              </span>
+                              <StatusBadge type="borrow" status={record.status} size="sm" />
+                            </div>
+                          ))}
+                          {batch.records.length > 5 && (
+                            <span className="text-xs text-dark-500">
+                              +{batch.records.length - 5} 件
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 ml-4 flex-shrink-0">
+                        {hasConflict && (
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            icon={<AlertTriangle className="w-3.5 h-3.5" />}
+                            onClick={() => handleNavigateToApproval(batch.batchId)}
+                          >
+                            处理冲突
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          icon={<ExternalLink className="w-3.5 h-3.5" />}
+                          onClick={() => handleNavigateToApproval(batch.batchId)}
+                        >
+                          查看详情
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const getBatchRecords = (batchId: string) => {
+    return records.filter(r => r.batchId === batchId);
+  };
+
   return (
     <PageContainer>
       <PageHeader
@@ -483,29 +741,42 @@ const CalendarBoardPage: React.FC = () => {
             <button
               onClick={() => setViewMode('month')}
               className={cn(
-                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
                 viewMode === 'month' ? 'bg-white shadow-sm text-primary-600' : 'text-dark-500 hover:text-dark-700'
               )}
             >
+              <Calendar className="w-3.5 h-3.5" />
               月视图
             </button>
             <button
               onClick={() => setViewMode('week')}
               className={cn(
-                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
                 viewMode === 'week' ? 'bg-white shadow-sm text-primary-600' : 'text-dark-500 hover:text-dark-700'
               )}
             >
+              <LayoutGrid className="w-3.5 h-3.5" />
               周视图
             </button>
             <button
               onClick={() => setViewMode('list')}
               className={cn(
-                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
                 viewMode === 'list' ? 'bg-white shadow-sm text-primary-600' : 'text-dark-500 hover:text-dark-700'
               )}
             >
+              <List className="w-3.5 h-3.5" />
               列表
+            </button>
+            <button
+              onClick={() => setViewMode('batch')}
+              className={cn(
+                'px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5',
+                viewMode === 'batch' ? 'bg-white shadow-sm text-primary-600' : 'text-dark-500 hover:text-dark-700'
+              )}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              会议视角
             </button>
           </div>
         </div>
@@ -533,6 +804,7 @@ const CalendarBoardPage: React.FC = () => {
       {viewMode === 'month' && renderMonthView()}
       {viewMode === 'week' && renderWeekView()}
       {viewMode === 'list' && renderListView()}
+      {viewMode === 'batch' && renderBatchView()}
 
       {selectedRecord && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

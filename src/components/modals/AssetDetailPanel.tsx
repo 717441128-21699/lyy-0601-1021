@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUIStore, useAssetStore, useBorrowStore, useUserStore } from '@/store';
 import { cn, formatDate, formatCurrency, getDaysRemaining, isOverdue } from '@/utils';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react';
 
 export const AssetDetailPanel: React.FC = () => {
+  const navigate = useNavigate();
   const { showAssetDetail, activeAssetId, closeAssetDetail, openBorrowModal, openAssetForm, navigateToBorrowRecord } = useUIStore();
   const { getAssetById } = useAssetStore();
   const { fetchRecords, getAssetOccupancy } = useBorrowStore();
@@ -40,6 +42,13 @@ export const AssetDetailPanel: React.FC = () => {
   const canEdit = isAdmin;
 
   const asset = activeAssetId ? getAssetById(activeAssetId) : null;
+
+  const handleNavigateToRecord = (recordId: string) => {
+    if (!activeAssetId) return;
+    navigateToBorrowRecord(recordId, activeAssetId);
+    closeAssetDetail();
+    navigate('/approval');
+  };
 
   React.useEffect(() => {
     if (activeAssetId) {
@@ -343,7 +352,7 @@ export const AssetDetailPanel: React.FC = () => {
                                 r.status === 'pending' && 'bg-warning-500',
                                 r.status === 'overdue' && 'bg-danger-500'
                               )}
-                              onClick={() => isAdmin && navigateToBorrowRecord(r.id, activeAssetId!)}
+                              onClick={() => isAdmin && handleNavigateToRecord(r.id)}
                               title={isAdmin ? `点击查看详情 - ${r.userName} - ${r.purpose}` : `${r.userName} - ${r.purpose}`}
                             >
                               <div className="flex items-center gap-1">
@@ -405,7 +414,7 @@ export const AssetDetailPanel: React.FC = () => {
                               size="sm"
                               variant="secondary"
                               icon={<ExternalLink className="w-3.5 h-3.5" />}
-                              onClick={() => navigateToBorrowRecord(record.id, activeAssetId!)}
+                              onClick={() => handleNavigateToRecord(record.id)}
                               className="flex-shrink-0 ml-2"
                             >
                               查看
