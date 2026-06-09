@@ -23,6 +23,8 @@ interface DataTableProps<T> {
   onSelectAll?: (selected: boolean) => void;
   rowId: (row: T) => string;
   onRowClick?: (row: T) => void;
+  highlightedRowId?: string | null;
+  onHighlightedRowVisible?: (rowId: string) => void;
   className?: string;
   emptyText?: string;
 }
@@ -39,12 +41,39 @@ export function DataTable<T>({
   onSelectAll,
   rowId,
   onRowClick,
+  highlightedRowId,
+  onHighlightedRowVisible,
   className,
   emptyText = '暂无数据',
 }: DataTableProps<T>) {
+  const rowRefs = React.useRef<Map<string, HTMLTableRowElement>>(new Map());
   const [currentPage, setCurrentPage] = React.useState(1);
   const [sortKey, setSortKey] = React.useState<string | null>(null);
   const [sortDirection, setSortDirection] = React.useState<'asc' | 'desc'>('asc');
+
+  React.useEffect(() => {
+    if (highlightedRowId) {
+      setTimeout(() => {
+        const rowEl = rowRefs.current.get(highlightedRowId);
+        if (rowEl) {
+          rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          onHighlightedRowVisible?.(highlightedRowId);
+        }
+      }, 100);
+    }
+  }, [highlightedRowId]);
+
+  React.useEffect(() => {
+    if (highlightedRowId && pagination) {
+      const rowIndex = data.findIndex(d => rowId(d) === highlightedRowId);
+      if (rowIndex >= 0) {
+        const targetPage = Math.floor(rowIndex / pageSize) + 1;
+        if (targetPage !== currentPage) {
+          setCurrentPage(targetPage);
+        }
+      }
+    }
+  }, [highlightedRowId, data, rowId, pagination, pageSize]);
 
   const totalPages = Math.ceil(data.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
@@ -135,13 +164,22 @@ export function DataTable<T>({
               paginatedData.map((row) => {
                 const id = rowId(row);
                 const isSelected = selectedRows.includes(id);
+                const isHighlighted = highlightedRowId === id;
                 return (
                   <tr
                     key={id}
+                    ref={(el) => {
+                      if (el) {
+                        rowRefs.current.set(id, el);
+                      } else {
+                        rowRefs.current.delete(id);
+                      }
+                    }}
                     className={cn(
                       'transition-colors',
                       onRowClick && 'cursor-pointer hover:bg-dark-50',
-                      isSelected && 'bg-primary-50'
+                      isSelected && 'bg-primary-50',
+                      isHighlighted && 'bg-warning-100 ring-2 ring-warning-400 ring-inset animate-pulse-soft'
                     )}
                     onClick={() => onRowClick?.(row)}
                   >

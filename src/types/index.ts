@@ -6,7 +6,7 @@ export type UserRole = 'employee' | 'admin' | 'approver';
 
 export type DamageLevel = 'none' | 'minor' | 'moderate' | 'severe';
 
-export type CalendarView = 'month' | 'week' | 'list';
+export type CalendarView = 'month' | 'week' | 'list' | 'batch';
 
 export type ReminderMethod = 'email' | 'sms' | 'phone' | 'wechat' | 'other';
 
@@ -51,6 +51,7 @@ export interface ReminderRecord {
 
 export interface BorrowRecord {
   id: string;
+  batchId: string;
   assetId: string;
   assetName: string;
   assetNo: string;
@@ -141,6 +142,34 @@ export interface BorrowFilters {
   assetId?: string;
   startDate?: string;
   endDate?: string;
+}
+
+export interface BorrowBatch {
+  batchId: string;
+  purpose: string;
+  userId: string;
+  userName: string;
+  userDepartment: string;
+  borrowDate: string;
+  expectedReturnDate: string;
+  createdAt: string;
+  records: BorrowRecord[];
+}
+
+export interface ReminderFilters {
+  method?: ReminderMethod;
+  remindedBy?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface BatchConflictInfo {
+  date: string;
+  assetId: string;
+  assetName: string;
+  batchId: string;
+  batchPurpose: string;
+  userName: string;
 }
 
 export interface StatisticsData {

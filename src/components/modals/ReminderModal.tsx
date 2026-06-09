@@ -4,7 +4,7 @@ import { Modal, ModalFooter } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
-import { formatDate } from '@/utils';
+import { formatDate, getReminderMethodLabel, getReminderMethodIcon, getReminderMethodColor, cn } from '@/utils';
 import { ReminderMethod } from '@/types';
 import {
   Bell,
@@ -17,11 +17,11 @@ import {
 } from 'lucide-react';
 
 const methodOptions: { value: ReminderMethod; label: string }[] = [
-  { value: 'email', label: '邮件' },
-  { value: 'sms', label: '短信' },
-  { value: 'phone', label: '电话' },
-  { value: 'wechat', label: '微信' },
-  { value: 'other', label: '其他' },
+  { value: 'email', label: `${getReminderMethodIcon('email')} 邮件` },
+  { value: 'sms', label: `${getReminderMethodIcon('sms')} 短信` },
+  { value: 'phone', label: `${getReminderMethodIcon('phone')} 电话` },
+  { value: 'wechat', label: `${getReminderMethodIcon('wechat')} 微信` },
+  { value: 'other', label: `${getReminderMethodIcon('other')} 其他` },
 ];
 
 export const ReminderModal: React.FC = () => {
@@ -81,7 +81,10 @@ export const ReminderModal: React.FC = () => {
             <CheckCircle2 className="w-8 h-8 text-success-500" />
           </div>
           <h3 className="text-xl font-bold text-dark-800 mb-2 font-display">催还通知已发送</h3>
-          <p className="text-dark-500">已通过 {methodOptions.find(m => m.value === method)?.label} 向 {record.userName} 发送催还通知</p>
+          <p className="text-dark-500">
+            已通过 <span className={getReminderMethodColor(method)}> {getReminderMethodLabel(method)} </span> 
+            向 {record.userName} 发送催还通知
+          </p>
         </div>
       </Modal>
     );
@@ -158,7 +161,10 @@ export const ReminderModal: React.FC = () => {
                 <div key={reminder.id} className="bg-dark-50 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-xs font-medium text-dark-700">
-                      {methodOptions.find(m => m.value === reminder.method)?.label} · {reminder.remindedByName}
+                      <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', getReminderMethodColor(reminder.method))}>
+                        {getReminderMethodIcon(reminder.method)} {getReminderMethodLabel(reminder.method)}
+                      </span>
+                      <span className="ml-2">{reminder.remindedByName}</span>
                     </span>
                     <span className="text-xs text-dark-500">
                       {formatDate(new Date(reminder.remindedAt))}

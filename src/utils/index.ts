@@ -57,6 +57,26 @@ interface StatusConfig {
   reminder: Record<string, StatusConfigItem>;
 }
 
+export const reminderMethodConfig: Record<string, { label: string; color: string; icon: string }> = {
+  email: { label: '邮件', color: 'bg-blue-100 text-blue-700', icon: '📧' },
+  sms: { label: '短信', color: 'bg-green-100 text-green-700', icon: '📱' },
+  phone: { label: '电话', color: 'bg-purple-100 text-purple-700', icon: '📞' },
+  wechat: { label: '微信', color: 'bg-success-100 text-success-700', icon: '💬' },
+  other: { label: '其他', color: 'bg-dark-100 text-dark-700', icon: '📝' },
+};
+
+export function getReminderMethodLabel(method: string): string {
+  return reminderMethodConfig[method]?.label || method;
+}
+
+export function getReminderMethodColor(method: string): string {
+  return reminderMethodConfig[method]?.color || 'bg-dark-100 text-dark-700';
+}
+
+export function getReminderMethodIcon(method: string): string {
+  return reminderMethodConfig[method]?.icon || '📝';
+}
+
 export const statusConfig: StatusConfig = {
   asset: {
     available: { label: '可用', color: 'bg-success-500', textColor: 'text-success-600', bgColor: 'bg-success-50' },

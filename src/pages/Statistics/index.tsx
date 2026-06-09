@@ -29,7 +29,7 @@ import {
 
 const StatisticsPage: React.FC = () => {
   const { assets, categories } = useAssetStore();
-  const { records, getOverdueRecords, updateOverdueStatus, getRemindersForRecord } = useBorrowStore();
+  const { getOverdueRecords, updateOverdueStatus, getRemindersForRecord, getMonthlyStatistics } = useBorrowStore();
   const { departments } = useUserStore();
   const { openReminderModal, openReminderHistoryModal } = useUIStore();
   const { currentUser } = useUserStore();
@@ -62,28 +62,6 @@ const StatisticsPage: React.FC = () => {
     return options;
   }, []);
 
-  const getFilteredRecords = React.useCallback(() => {
-    let filtered = [...records];
-    
-    if (selectedDepartment) {
-      filtered = filtered.filter(r => r.userDepartment === selectedDepartment);
-    }
-    
-    if (selectedMonth) {
-      const [year, month] = selectedMonth.split('-').map(Number);
-      const monthStart = new Date(year, month - 1, 1);
-      const monthEnd = new Date(year, month, 0);
-      const monthStartStr = formatDate(monthStart);
-      const monthEndStr = formatDate(monthEnd);
-      
-      filtered = filtered.filter(r => {
-        return r.createdAt >= monthStartStr && r.createdAt <= monthEndStr;
-      });
-    }
-    
-    return filtered;
-  }, [records, selectedDepartment, selectedMonth]);
-
   const handleRefresh = async () => {
     setIsRefreshing(true);
     updateOverdueStatus();
@@ -91,63 +69,55 @@ const StatisticsPage: React.FC = () => {
     setIsRefreshing(false);
   };
 
-  const filteredRecords = getFilteredRecords();
+  const defaultMonth = React.useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const effectiveMonth = selectedMonth || defaultMonth;
+
+  const monthlyStats = React.useMemo(() => {
+    return getMonthlyStatistics(
+      effectiveMonth,
+      selectedDepartment || undefined
+    );
+  }, [getMonthlyStatistics, effectiveMonth, selectedDepartment]);
 
   const totalAssets = assets.length;
   const availableAssets = assets.filter(a => a.status === 'available').length;
   const borrowedAssets = assets.filter(a => a.status === 'borrowed').length;
   const maintenanceAssets = assets.filter(a => a.status === 'maintenance').length;
 
-  const overdueRecords = getOverdueRecords({
-    department: selectedDepartment || undefined,
-    month: selectedMonth || undefined,
-  });
+  const overdueRecords = React.useMemo(() => {
+    if (selectedMonth) {
+      return monthlyStats.overdueList;
+    }
+    return getOverdueRecords({
+      department: selectedDepartment || undefined,
+    });
+  }, [selectedMonth, selectedDepartment, monthlyStats.overdueList, getOverdueRecords]);
 
-  const totalBorrowCount = filteredRecords.filter(r => 
-    ['approved', 'returned', 'damaged'].includes(r.status)
-  ).length;
+  const totalBorrowCount = React.useMemo(() => {
+    return monthlyStats.borrowTrend.reduce((sum, item) => sum + item.count, 0);
+  }, [monthlyStats.borrowTrend]);
 
   const monthlyTrend = React.useMemo(() => {
-    const counts: { date: string; count: number }[] = [];
-    const now = new Date();
-    
-    for (let i = 5; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const monthStr = `${date.getMonth() + 1}月`;
-      
-      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
-      const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-      
-      const count = filteredRecords.filter(r => {
-        const created = new Date(r.createdAt);
-        return created >= monthStart && created <= monthEnd && 
-               ['approved', 'returned', 'damaged'].includes(r.status);
-      }).length;
-      
-      counts.push({ date: monthStr, count });
-    }
-    
-    return counts;
-  }, [filteredRecords]);
+    return monthlyStats.borrowTrend.map(item => ({
+      date: item.date.split('-').slice(1).join('/'),
+      count: item.count,
+    }));
+  }, [monthlyStats.borrowTrend]);
 
   const departmentUsage = React.useMemo(() => {
-    const deptMap = new Map<string, number>();
-    
-    filteredRecords.forEach(r => {
-      if (['approved', 'returned', 'damaged'].includes(r.status)) {
-        deptMap.set(r.userDepartment, (deptMap.get(r.userDepartment) || 0) + 1);
-      }
-    });
-    
-    const result = departments.map(d => ({
-      name: d.name,
-      value: deptMap.get(d.name) || 0,
-    })).sort((a, b) => b.value - a.value).slice(0, 8);
+    const result = monthlyStats.departmentUsage.map(d => ({
+      name: d.department,
+      value: d.count,
+    }));
     
     return selectedDepartment 
       ? result.filter(d => d.name === selectedDepartment)
       : result;
-  }, [filteredRecords, departments, selectedDepartment]);
+  }, [monthlyStats.departmentUsage, selectedDepartment]);
 
   const categoryDistribution = React.useMemo(() => {
     return categories.map(c => ({
@@ -157,27 +127,45 @@ const StatisticsPage: React.FC = () => {
   }, [assets, categories]);
 
   const idleAssets = React.useMemo(() => {
-    const daysAgo = selectedMonth ? 90 : 30;
-    const thresholdDate = new Date();
-    thresholdDate.setDate(thresholdDate.getDate() - daysAgo);
-    
-    const recentlyBorrowedAssetIds = new Set(
-      filteredRecords
-        .filter(r => new Date(r.createdAt) >= thresholdDate)
-        .map(r => r.assetId)
-    );
-    
-    return assets.filter(
-      a => a.status === 'available' && !recentlyBorrowedAssetIds.has(a.id)
-    ).slice(0, 10);
-  }, [assets, filteredRecords, selectedMonth]);
+    return monthlyStats.idleAssets
+      .map(item => item.asset)
+      .slice(0, 10);
+  }, [monthlyStats.idleAssets]);
+
+  const idleAssetDays = React.useMemo(() => {
+    const map = new Map<string, number>();
+    monthlyStats.idleAssets.forEach(item => {
+      map.set(item.asset.id, item.daysIdle);
+    });
+    return map;
+  }, [monthlyStats.idleAssets]);
 
   const damagedRecords = React.useMemo(() => {
-    return filteredRecords
+    const [year, month] = effectiveMonth.split('-').map(Number);
+    const monthStart = new Date(year, month - 1, 1).toISOString().split('T')[0];
+    const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
+    
+    let records = monthlyStats.overdueList.concat(
+      monthlyStats.borrowTrend.flatMap(() => [])
+    );
+    
+    const allRecords = getOverdueRecords().concat(
+      monthlyStats.overdueList
+    ).filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+    
+    return allRecords
+      .filter(r => {
+        if (selectedMonth) {
+          return r.actualReturnDate && 
+                 r.actualReturnDate >= monthStart && 
+                 r.actualReturnDate <= monthEnd;
+        }
+        return r.damageLevel !== 'none' && r.damageLevel !== undefined;
+      })
       .filter(r => r.damageLevel !== 'none' && r.damageLevel !== undefined)
       .sort((a, b) => new Date(b.actualReturnDate || b.createdAt).getTime() - new Date(a.actualReturnDate || a.createdAt).getTime())
       .slice(0, 10);
-  }, [filteredRecords]);
+  }, [effectiveMonth, selectedMonth, monthlyStats.overdueList, getOverdueRecords]);
 
   const overdueColumns = [
     {
@@ -332,6 +320,23 @@ const StatisticsPage: React.FC = () => {
           {asset.managerName}
         </div>
       ),
+    },
+    {
+      key: 'daysIdle',
+      header: '闲置天数',
+      accessor: (asset: Asset) => {
+        const days = idleAssetDays.get(asset.id) || 0;
+        return (
+          <span className={cn(
+            'px-2 py-1 rounded-full text-xs font-medium',
+            days >= 30 ? 'bg-danger-100 text-danger-700' : 
+            days >= 15 ? 'bg-warning-100 text-warning-700' : 
+            'bg-dark-100 text-dark-600'
+          )}>
+            {days} 天
+          </span>
+        );
+      },
     },
     {
       key: 'purchasePrice',
@@ -498,7 +503,7 @@ const StatisticsPage: React.FC = () => {
           delay={0}
         />
         <StatCard
-          title={selectedMonth ? `当月借用` : '累计借用'}
+          title={`${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月借用`}
           value={totalBorrowCount}
           icon={HandCoins}
           trend={12.3}
@@ -507,7 +512,7 @@ const StatisticsPage: React.FC = () => {
           delay={100}
         />
         <StatCard
-          title="逾期未还"
+          title={selectedMonth ? `${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月逾期` : '逾期未还'}
           value={overdueRecords.length}
           icon={AlertTriangle}
           trend={-5.2}
@@ -516,7 +521,7 @@ const StatisticsPage: React.FC = () => {
           delay={200}
         />
         <StatCard
-          title={selectedMonth ? `当月闲置（90天）` : '闲置资产（30天）'}
+          title={`${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月闲置（90天）`}
           value={idleAssets.length}
           icon={Clock}
           trend={3.1}
@@ -590,8 +595,17 @@ const StatisticsPage: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-2 gap-4 mb-6">
-        <LineChart data={monthlyTrend} title={selectedDepartment ? `${selectedDepartment} - 借用趋势` : '借用趋势（近6个月）'} height={300} />
-        <BarChart data={departmentUsage} title={selectedDepartment ? `${selectedDepartment} - 使用统计` : '部门使用排行'} height={300} color="#10b981" />
+        <LineChart 
+          data={monthlyTrend} 
+          title={`${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月 ${selectedDepartment ? selectedDepartment + ' - ' : ''}借用趋势`} 
+          height={300} 
+        />
+        <BarChart 
+          data={departmentUsage} 
+          title={`${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月 ${selectedDepartment ? selectedDepartment + ' - ' : ''}部门使用排行`} 
+          height={300} 
+          color="#10b981" 
+        />
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -636,11 +650,12 @@ const StatisticsPage: React.FC = () => {
             <AlertTriangle className="w-5 h-5 text-danger-500" />
             <h3 className="text-lg font-semibold text-dark-800 font-display">
               逾期名单
-              {(selectedDepartment || selectedMonth) && (
-                <span className="text-sm font-normal text-dark-500 ml-2">
-                  （{[selectedDepartment && selectedDepartment, selectedMonth && `${selectedMonth.split('-')[0]}年${selectedMonth.split('-')[1]}月`].filter(Boolean).join(' · ')}）
-                </span>
-              )}
+              <span className="text-sm font-normal text-dark-500 ml-2">
+                （{[
+                  selectedDepartment && selectedDepartment, 
+                  `${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月`
+                ].filter(Boolean).join(' · ')}）
+              </span>
             </h3>
             {overdueRecords.length > 0 && (
               <span className="bg-danger-100 text-danger-600 px-2 py-0.5 rounded-full text-xs font-medium">
@@ -666,7 +681,7 @@ const StatisticsPage: React.FC = () => {
               <h3 className="text-lg font-semibold text-dark-800 font-display">
                 闲置资产
                 <span className="text-sm font-normal text-dark-500 ml-2">
-                  （{selectedMonth ? '90天' : '30天'}未使用）
+                  （90天未使用 · ${effectiveMonth.split('-')[0]}年${effectiveMonth.split('-')[1]}月）
                 </span>
               </h3>
             </div>

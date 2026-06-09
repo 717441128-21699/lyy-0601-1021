@@ -343,7 +343,7 @@ export const AssetDetailPanel: React.FC = () => {
                                 r.status === 'pending' && 'bg-warning-500',
                                 r.status === 'overdue' && 'bg-danger-500'
                               )}
-                              onClick={() => isAdmin && navigateToBorrowRecord(r.id)}
+                              onClick={() => isAdmin && navigateToBorrowRecord(r.id, activeAssetId!)}
                               title={isAdmin ? `点击查看详情 - ${r.userName} - ${r.purpose}` : `${r.userName} - ${r.purpose}`}
                             >
                               <div className="flex items-center gap-1">
@@ -405,7 +405,7 @@ export const AssetDetailPanel: React.FC = () => {
                               size="sm"
                               variant="secondary"
                               icon={<ExternalLink className="w-3.5 h-3.5" />}
-                              onClick={() => navigateToBorrowRecord(record.id)}
+                              onClick={() => navigateToBorrowRecord(record.id, activeAssetId!)}
                               className="flex-shrink-0 ml-2"
                             >
                               查看

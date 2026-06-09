@@ -115,6 +115,9 @@ const statusSequence: BorrowRecord['status'][] = [
   'damaged'
 ];
 
+const batchPurposes = ['季度总结会议', '客户现场演示', '年度培训活动', '产品发布会', '技术峰会'];
+let batchCounter = 0;
+
 for (let i = 0; i < 80; i++) {
   const assetIndex = i % 50;
   const asset = assets[assetIndex];
@@ -178,8 +181,24 @@ for (let i = 0; i < 80; i++) {
     });
   }
   
+  let batchId: string;
+  let purpose: string;
+  
+  if (i % 3 === 0 && i < 30) {
+    batchCounter++;
+    batchId = `batch-${batchCounter.toString().padStart(3, '0')}`;
+    purpose = batchPurposes[batchCounter % batchPurposes.length];
+  } else if (i < 30) {
+    batchId = `batch-${batchCounter.toString().padStart(3, '0')}`;
+    purpose = batchPurposes[batchCounter % batchPurposes.length];
+  } else {
+    batchId = `batch-single-${i.toString().padStart(3, '0')}`;
+    purpose = ['项目开发使用', '客户拜访演示', '外出会议', '培训活动', '展会展示', '日常办公'][i % 6];
+  }
+  
   borrowRecords.push({
     id: generateId('bor', i + 1),
+    batchId,
     assetId: asset.id,
     assetName: asset.name,
     assetNo: asset.assetNo,
@@ -188,7 +207,7 @@ for (let i = 0; i < 80; i++) {
     userDepartment: user.departmentName,
     approverId: approver.id,
     approverName: approver.name,
-    purpose: ['项目开发使用', '客户拜访演示', '外出会议', '培训活动', '展会展示', '日常办公'][i % 6],
+    purpose,
     borrowDate: formatDate(borrowDate),
     expectedReturnDate: formatDate(expectedReturnDate),
     actualReturnDate,

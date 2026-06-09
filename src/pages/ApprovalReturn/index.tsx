@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useBorrowStore, useUIStore, useUserStore } from '@/store';
+import { useBorrowStore, useUIStore, useUserStore, useAssetStore } from '@/store';
 import { PageContainer, PageHeader } from '@/components/Layout/PageContainer';
 import { SearchInput } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
@@ -23,9 +23,16 @@ import {
   AlertCircle,
   Bell,
   History,
+  ArrowLeft,
+  Package,
+  X,
+  List,
+  Layers,
+  ChevronRight,
 } from 'lucide-react';
 
 type TabMode = 'pending' | 'borrowed' | 'returned';
+type ViewMode = 'record' | 'batch';
 
 const statusOptions: { value: BorrowStatus | 'all'; label: string }[] = [
   { value: 'all', label: '全部状态' },
@@ -38,17 +45,22 @@ const statusOptions: { value: BorrowStatus | 'all'; label: string }[] = [
 ];
 
 const ApprovalReturnPage: React.FC = () => {
-  const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus, getRemindersForRecord } = useBorrowStore();
-  const { openReturnModal, openReminderModal, openReminderHistoryModal } = useUIStore();
+  const { records, fetchRecords, approveBorrow, rejectBorrow, loading, updateOverdueStatus, getRemindersForRecord, getRecordById, getBatches, getBatchRecords, getBatchById } = useBorrowStore();
+  const { openReturnModal, openReminderModal, openReminderHistoryModal, highlightedBorrowRecordId, previousAssetDetailId, navigateBackToAssetDetail, clearHighlightedRecord } = useUIStore();
   const { currentUser } = useUserStore();
+  const { getAssetById } = useAssetStore();
   const [activeTab, setActiveTab] = React.useState<TabMode>('pending');
+  const [viewMode, setViewMode] = React.useState<ViewMode>('record');
   const [keyword, setKeyword] = React.useState('');
   const [statusFilter, setStatusFilter] = React.useState<BorrowStatus | 'all'>('all');
   const [filteredRecords, setFilteredRecords] = React.useState<BorrowRecord[]>([]);
+  const [filteredBatches, setFilteredBatches] = React.useState<any[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = React.useState<string | null>(null);
   const [selectedRows, setSelectedRows] = React.useState<string[]>([]);
   const [showRejectModal, setShowRejectModal] = React.useState(false);
   const [rejectReason, setRejectReason] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
+  const [highlightMessage, setHighlightMessage] = React.useState<string | null>(null);
 
   const isApprover = currentUser?.role === 'approver' || currentUser?.role === 'admin';
   const isEmployee = currentUser?.role === 'employee';
@@ -56,6 +68,30 @@ const ApprovalReturnPage: React.FC = () => {
   React.useEffect(() => {
     updateOverdueStatus();
   }, [updateOverdueStatus]);
+
+  React.useEffect(() => {
+    if (highlightedBorrowRecordId) {
+      const record = getRecordById(highlightedBorrowRecordId);
+      if (record) {
+        let targetTab: TabMode = 'pending';
+        if (['approved', 'overdue'].includes(record.status)) {
+          targetTab = 'borrowed';
+        } else if (['returned', 'damaged', 'rejected'].includes(record.status)) {
+          targetTab = 'returned';
+        }
+        setActiveTab(targetTab);
+        
+        const asset = getAssetById(record.assetId);
+        setHighlightMessage(
+          `已定位到借用记录：${record.userName} - ${asset?.name || record.assetName}`
+        );
+        
+        setTimeout(() => {
+          setHighlightMessage(null);
+        }, 5000);
+      }
+    }
+  }, [highlightedBorrowRecordId, getRecordById, getAssetById]);
 
   React.useEffect(() => {
     const filters: any = {};
@@ -83,6 +119,44 @@ const ApprovalReturnPage: React.FC = () => {
       setFilteredRecords(data);
     });
   }, [keyword, statusFilter, activeTab, fetchRecords, isEmployee, currentUser]);
+
+  React.useEffect(() => {
+    if (viewMode === 'batch') {
+      const batchFilters: any = {};
+      if (isEmployee && currentUser) {
+        batchFilters.department = currentUser.departmentName;
+      }
+      
+      const batches = getBatches(batchFilters);
+      
+      let filtered = batches;
+      
+      if (activeTab === 'pending') {
+        filtered = batches.filter(b => 
+          b.records.some(r => r.status === 'pending')
+        );
+      } else if (activeTab === 'borrowed') {
+        filtered = batches.filter(b => 
+          b.records.some(r => ['approved', 'overdue'].includes(r.status))
+        );
+      } else if (activeTab === 'returned') {
+        filtered = batches.filter(b => 
+          b.records.some(r => ['returned', 'damaged', 'rejected'].includes(r.status))
+        );
+      }
+      
+      if (keyword) {
+        const kw = keyword.toLowerCase();
+        filtered = filtered.filter(b => 
+          b.purpose.toLowerCase().includes(kw) ||
+          b.userName.toLowerCase().includes(kw) ||
+          b.records.some(r => r.assetName.toLowerCase().includes(kw))
+        );
+      }
+      
+      setFilteredBatches(filtered);
+    }
+  }, [viewMode, activeTab, keyword, getBatches, isEmployee, currentUser]);
 
   const getCountByStatus = (status: BorrowStatus | BorrowStatus[], forCurrentUser = false) => {
     return records.filter(r => {
@@ -373,8 +447,58 @@ const ApprovalReturnPage: React.FC = () => {
     return returnedColumns;
   };
 
+  const previousAsset = previousAssetDetailId ? getAssetById(previousAssetDetailId) : null;
+
+  const handleHighlightedVisible = () => {
+    setTimeout(() => {
+      clearHighlightedRecord();
+    }, 3000);
+  };
+
   return (
     <PageContainer>
+      {highlightMessage && (
+        <div className="mb-4 bg-warning-50 border border-warning-200 rounded-lg p-4 flex items-center justify-between animate-fade-in">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-warning-500 flex-shrink-0" />
+            <div>
+              <p className="font-medium text-warning-800">{highlightMessage}</p>
+              <p className="text-sm text-warning-600 mt-0.5">记录已高亮显示，3秒后自动取消</p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<X className="w-4 h-4" />}
+            onClick={() => {
+              setHighlightMessage(null);
+              clearHighlightedRecord();
+            }}
+          />
+        </div>
+      )}
+
+      <div className="flex items-center gap-4 mb-4">
+        {previousAsset && (
+          <Button
+            variant="secondary"
+            icon={<ArrowLeft className="w-4 h-4" />}
+            onClick={navigateBackToAssetDetail}
+            className="flex-shrink-0"
+          >
+            返回资产详情
+          </Button>
+        )}
+        {previousAsset && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-primary-50 border border-primary-200 rounded-lg">
+            <Package className="w-4 h-4 text-primary-500" />
+            <span className="text-sm text-primary-700">
+              来自：<span className="font-medium">{previousAsset.name}</span>
+            </span>
+          </div>
+        )}
+      </div>
+
       <PageHeader
         title="审批归还"
         description={
@@ -494,6 +618,35 @@ const ApprovalReturnPage: React.FC = () => {
         </button>
       </div>
 
+      {isApprover && (
+        <div className="flex gap-1 bg-white rounded-xl shadow-card p-1 mb-6 w-fit">
+          <button
+            onClick={() => { setViewMode('record'); setSelectedBatchId(null); }}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2',
+              viewMode === 'record'
+                ? 'bg-primary-500 text-white shadow-sm'
+                : 'text-dark-600 hover:bg-dark-50'
+            )}
+          >
+            <List className="w-4 h-4" />
+            按记录查看
+          </button>
+          <button
+            onClick={() => { setViewMode('batch'); setSelectedRows([]); }}
+            className={cn(
+              'px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2',
+              viewMode === 'batch'
+                ? 'bg-primary-500 text-white shadow-sm'
+                : 'text-dark-600 hover:bg-dark-50'
+            )}
+          >
+            <Layers className="w-4 h-4" />
+            按批次查看
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-xl shadow-card p-4 mb-6">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex-1 min-w-[280px]">
@@ -501,17 +654,23 @@ const ApprovalReturnPage: React.FC = () => {
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
               onSearch={setKeyword}
-              placeholder={isEmployee ? "搜索我的资产名称、用途..." : "搜索资产名称、申请人、用途..."}
+              placeholder={
+                viewMode === 'batch' 
+                  ? "搜索会议用途、申请人、资产名称..."
+                  : (isEmployee ? "搜索我的资产名称、用途..." : "搜索资产名称、申请人、用途...")
+              }
             />
           </div>
-          <div className="w-40">
-            <Select
-              options={statusOptions}
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as BorrowStatus | 'all')}
-            />
-          </div>
-          {isApprover && activeTab === 'pending' && selectedRows.length > 0 && (
+          {viewMode === 'record' && (
+            <div className="w-40">
+              <Select
+                options={statusOptions}
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as BorrowStatus | 'all')}
+              />
+            </div>
+          )}
+          {isApprover && activeTab === 'pending' && viewMode === 'record' && selectedRows.length > 0 && (
             <div className="flex items-center gap-2 ml-auto">
               <span className="text-sm text-dark-500">
                 已选择 {selectedRows.length} 项
@@ -553,24 +712,110 @@ const ApprovalReturnPage: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-card overflow-hidden">
-        <DataTable
-          columns={getColumns()}
-          data={filteredRecords}
-          loading={loading}
-          pagination={true}
-          pageSize={10}
-          selectable={activeTab === 'pending' && isApprover}
-          selectedRows={selectedRows}
-          onSelectRow={handleSelectRow}
-          onSelectAll={handleSelectAll}
-          rowId={(row) => row.id}
-          emptyText={
-            activeTab === 'pending' ? '暂无待审批申请' :
-            activeTab === 'borrowed' ? '暂无借用中资产' : '暂无归还记录'
-          }
-        />
-      </div>
+      {viewMode === 'record' ? (
+        <div className="bg-white rounded-xl shadow-card overflow-hidden">
+          <DataTable
+            columns={getColumns()}
+            data={filteredRecords}
+            loading={loading}
+            pagination={true}
+            pageSize={10}
+            selectable={activeTab === 'pending' && isApprover}
+            selectedRows={selectedRows}
+            onSelectRow={handleSelectRow}
+            onSelectAll={handleSelectAll}
+            rowId={(row) => row.id}
+            highlightedRowId={highlightedBorrowRecordId}
+            onHighlightedRowVisible={handleHighlightedVisible}
+            emptyText={
+              activeTab === 'pending' ? '暂无待审批申请' :
+              activeTab === 'borrowed' ? '暂无借用中资产' : '暂无归还记录'
+            }
+          />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {selectedBatchId ? (
+            <BatchDetailView
+              batchId={selectedBatchId}
+              onBack={() => setSelectedBatchId(null)}
+              activeTab={activeTab}
+              isApprover={isApprover}
+              handleApprove={handleApprove}
+              handleRejectSingle={(id) => {
+                setSelectedRows([id]);
+                setShowRejectModal(true);
+              }}
+              openReturnModal={openReturnModal}
+              openReminderModal={openReminderModal}
+              openReminderHistoryModal={openReminderHistoryModal}
+              getRemindersForRecord={getRemindersForRecord}
+            />
+          ) : (
+            <div className="bg-white rounded-xl shadow-card overflow-hidden">
+              {filteredBatches.length === 0 ? (
+                <div className="text-center py-12">
+                  <Package className="w-12 h-12 text-dark-300 mx-auto mb-3" />
+                  <p className="text-dark-500">
+                    {activeTab === 'pending' ? '暂无待审批批次' :
+                     activeTab === 'borrowed' ? '暂无借用中批次' : '暂无已归还批次'}
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-100">
+                  {filteredBatches.map((batch) => (
+                    <div
+                      key={batch.batchId}
+                      className="p-4 hover:bg-dark-50 cursor-pointer transition-colors"
+                      onClick={() => setSelectedBatchId(batch.batchId)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h4 className="font-semibold text-dark-800">{batch.purpose}</h4>
+                            <span className="text-xs bg-dark-100 text-dark-600 px-2 py-0.5 rounded-full">
+                              {batch.records.length} 件资产
+                            </span>
+                            <BatchStatusBadge records={batch.records} />
+                          </div>
+                          <div className="flex items-center gap-4 text-sm text-dark-500">
+                            <span className="flex items-center gap-1">
+                              <User className="w-3.5 h-3.5" />
+                              {batch.userName} · {batch.userDepartment}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5" />
+                              {formatDate(batch.borrowDate)} ~ {formatDate(batch.expectedReturnDate)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" />
+                              申请时间: {formatDate(batch.createdAt)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            {batch.records.slice(0, 5).map((record: BorrowRecord, i: number) => (
+                              <div key={i} className="flex items-center gap-1">
+                                <StatusBadge type="borrow" status={record.status} size="sm" />
+                                <span className="text-xs text-dark-600">{record.assetName}</span>
+                              </div>
+                            ))}
+                            {batch.records.length > 5 && (
+                              <span className="text-xs text-dark-500">
+                                +{batch.records.length - 5} 件
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronRight className="w-5 h-5 text-dark-400" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       <Modal
         open={showRejectModal}
@@ -623,6 +868,300 @@ const ApprovalReturnPage: React.FC = () => {
         </form>
       </Modal>
     </PageContainer>
+  );
+};
+
+const BatchStatusBadge: React.FC<{ records: BorrowRecord[] }> = ({ records }) => {
+  const statuses = new Set(records.map(r => r.status));
+  
+  if (statuses.has('pending') && records.some(r => r.status === 'pending')) {
+    return (
+      <span className="text-xs bg-warning-100 text-warning-700 px-2 py-0.5 rounded-full">
+        部分待审批
+      </span>
+    );
+  }
+  
+  if (statuses.has('overdue')) {
+    return (
+      <span className="text-xs bg-danger-100 text-danger-700 px-2 py-0.5 rounded-full">
+        含逾期
+      </span>
+    );
+  }
+  
+  if (statuses.has('rejected') && statuses.has('approved')) {
+    return (
+      <span className="text-xs bg-primary-100 text-primary-700 px-2 py-0.5 rounded-full">
+        部分通过
+      </span>
+    );
+  }
+  
+  if ([...statuses].every(s => s === 'approved')) {
+    return (
+      <span className="text-xs bg-success-100 text-success-700 px-2 py-0.5 rounded-full">
+        全部通过
+      </span>
+    );
+  }
+  
+  if ([...statuses].every(s => s === 'returned' || s === 'damaged')) {
+    return (
+      <span className="text-xs bg-dark-100 text-dark-700 px-2 py-0.5 rounded-full">
+        已归还
+      </span>
+    );
+  }
+  
+  return null;
+};
+
+interface BatchDetailViewProps {
+  batchId: string;
+  onBack: () => void;
+  activeTab: TabMode;
+  isApprover: boolean;
+  handleApprove: (ids: string[]) => void;
+  handleRejectSingle: (id: string) => void;
+  openReturnModal: (id: string) => void;
+  openReminderModal: (id: string) => void;
+  openReminderHistoryModal: (id: string) => void;
+  getRemindersForRecord: (id: string) => any[];
+}
+
+const BatchDetailView: React.FC<BatchDetailViewProps> = ({
+  batchId,
+  onBack,
+  activeTab,
+  isApprover,
+  handleApprove,
+  handleRejectSingle,
+  openReturnModal,
+  openReminderModal,
+  openReminderHistoryModal,
+  getRemindersForRecord,
+}) => {
+  const { getBatchById } = useBorrowStore();
+  const { getAssetById } = useAssetStore();
+  const batch = getBatchById(batchId);
+
+  if (!batch) {
+    return (
+      <div className="bg-white rounded-xl shadow-card p-8 text-center">
+      <p className="text-dark-500">批次不存在</p>
+      <Button variant="secondary" onClick={onBack} className="mt-4">
+        返回列表
+      </Button>
+      </div>
+    );
+  }
+
+  const pendingRecords = batch.records.filter(r => r.status === 'pending');
+  const approvedRecords = batch.records.filter(r => ['approved', 'overdue'].includes(r.status));
+  const returnedRecords = batch.records.filter(r => ['returned', 'damaged', 'rejected'].includes(r.status));
+
+  const displayRecords = activeTab === 'pending' ? pendingRecords :
+                       activeTab === 'borrowed' ? approvedRecords :
+                       returnedRecords;
+
+  const handleBatchApproveAll = () => {
+    if (pendingRecords.length > 0) {
+      handleApprove(pendingRecords.map(r => r.id));
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-card overflow-hidden">
+      <div className="p-4 border-b border-dark-100 bg-dark-50">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<ArrowLeft className="w-4 h-4" />}
+            onClick={onBack}
+          >
+            返回批次列表
+          </Button>
+          <div className="flex-1">
+            <h3 className="font-semibold text-dark-800 text-lg">{batch.purpose}</h3>
+            <div className="flex items-center gap-4 text-sm text-dark-500 mt-1">
+              <span>{batch.userName} · {batch.userDepartment}</span>
+              <span>{formatDate(batch.borrowDate)} ~ {formatDate(batch.expectedReturnDate)}</span>
+              <span className="text-xs bg-dark-100 text-dark-600 px-2 py-0.5 rounded-full">
+                {batch.records.length} 件资产
+              </span>
+            </div>
+          </div>
+          {isApprover && activeTab === 'pending' && pendingRecords.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-dark-500">
+                待审批 {pendingRecords.length} 项
+              </span>
+              <Button
+                variant="success"
+                size="sm"
+                icon={<CheckCircle className="w-4 h-4" />}
+                onClick={handleBatchApproveAll}
+              >
+                全部同意
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
+          <div className="bg-warning-50 border border-warning-200 rounded-lg p-3 text-center">
+            <p className="text-warning-600">待审批</p>
+            <p className="text-xl font-bold text-warning-700">{pendingRecords.length}</p>
+          </div>
+          <div className="bg-primary-50 border border-primary-200 rounded-lg p-3 text-center">
+            <p className="text-primary-600">借用中</p>
+            <p className="text-xl font-bold text-primary-700">{approvedRecords.length}</p>
+          </div>
+          <div className="bg-success-50 border border-success-200 rounded-lg p-3 text-center">
+            <p className="text-success-600">已归还</p>
+            <p className="text-xl font-bold text-success-700">{returnedRecords.length}</p>
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {displayRecords.map((record) => {
+            const reminders = getRemindersForRecord(record.id);
+            const isOverdue = record.status === 'overdue';
+            
+            return (
+              <div
+                key={record.id}
+                className="border border-dark-200 rounded-lg p-4 hover:border-primary-300 transition-colors"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3 flex-1">
+                    <img
+                      src={getAssetById(record.assetId)?.imageUrl || ''}
+                      alt={record.assetName}
+                      className="w-12 h-12 rounded-lg object-cover flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-medium text-dark-800">{record.assetName}</h4>
+                        <span className="text-xs text-dark-500">{record.assetNo}</span>
+                        <StatusBadge type="borrow" status={record.status} size="sm" />
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-dark-500">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5" />
+                          {formatDate(record.borrowDate)} ~ {formatDate(record.expectedReturnDate)}
+                        </span>
+                        {isOverdue && (
+                          <span className="text-danger-600 flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            已逾期
+                          </span>
+                        )}
+                        {record.damageLevel && record.damageLevel !== 'none' && (
+                          <span className="text-warning-600">
+                            {record.damageLevel === 'minor' ? '轻微损坏' :
+                             record.damageLevel === 'moderate' ? '中等损坏' : '严重损坏'}
+                          </span>
+                        )}
+                        {record.repairCost && record.repairCost > 0 && (
+                          <span className="text-dark-600">
+                            维修费: ¥{record.repairCost}
+                          </span>
+                        )}
+                      </div>
+                      {record.damageNote && (
+                        <p className="text-xs text-dark-500 mt-1">
+                          备注: {record.damageNote}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+                    {isApprover && record.status === 'pending' && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="success"
+                          icon={<CheckCircle className="w-4 h-4" />}
+                          onClick={() => handleApprove([record.id])}
+                        >
+                          同意
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          icon={<XCircle className="w-4 h-4" />}
+                          onClick={() => handleRejectSingle(record.id)}
+                        >
+                          驳回
+                        </Button>
+                      </>
+                    )}
+                    
+                    {(record.status === 'approved' || record.status === 'overdue') && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant={isOverdue ? 'danger' : 'primary'}
+                          icon={<ScanLine className="w-3.5 h-3.5" />}
+                          onClick={() => openReturnModal(record.id)}
+                        >
+                          {isOverdue ? '逾期归还' : '归还'}
+                        </Button>
+                        {isOverdue && isApprover && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={<Bell className="w-3.5 h-3.5 text-warning-600" />}
+                              onClick={() => openReminderModal(record.id)}
+                            >
+                              催还
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              icon={<History className="w-3.5 h-3.5" />}
+                              onClick={() => openReminderHistoryModal(record.id)}
+                            >
+                              历史
+                            </Button>
+                          </>
+                        )}
+                      </>
+                    )}
+
+                    {isOverdue && isApprover && reminders.length > 0 && (
+                      <span className={cn(
+                        'px-2 py-1 rounded-full text-xs font-medium',
+                        'bg-warning-100 text-warning-700'
+                      )}>
+                        {reminders.length} 次催还
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {displayRecords.length === 0 && (
+            <div className="text-center py-8">
+              <Package className="w-12 h-12 text-dark-300 mx-auto mb-3" />
+              <p className="text-dark-500">
+                {activeTab === 'pending' ? '本批次暂无待审批资产' :
+                 activeTab === 'borrowed' ? '本批次暂无借用中资产' : '本批次暂无已归还资产'}
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

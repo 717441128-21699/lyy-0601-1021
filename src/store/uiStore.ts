@@ -16,6 +16,7 @@ interface UIState {
   reminderModalRecordId: string | null;
   reminderHistoryRecordId: string | null;
   highlightedBorrowRecordId: string | null;
+  previousAssetDetailId: string | null;
   toggleSidebar: () => void;
   setCurrentPage: (page: string) => void;
   openAssetDetail: (id: string) => void;
@@ -30,10 +31,12 @@ interface UIState {
   closeReminderModal: () => void;
   openReminderHistoryModal: (recordId: string) => void;
   closeReminderHistoryModal: () => void;
-  navigateToBorrowRecord: (recordId: string) => void;
+  navigateToBorrowRecord: (recordId: string, assetId?: string) => void;
+  navigateBackToAssetDetail: () => void;
+  clearHighlightedRecord: () => void;
 }
 
-export const useUIStore = create<UIState>((set) => ({
+export const useUIStore = create<UIState>((set, get) => ({
   sidebarCollapsed: false,
   currentPage: 'assets',
   activeAssetId: null,
@@ -49,14 +52,15 @@ export const useUIStore = create<UIState>((set) => ({
   reminderModalRecordId: null,
   reminderHistoryRecordId: null,
   highlightedBorrowRecordId: null,
+  previousAssetDetailId: null,
 
   toggleSidebar: () => set(state => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   
   setCurrentPage: (page) => set({ currentPage: page }),
   
-  openAssetDetail: (id) => set({ activeAssetId: id, showAssetDetail: true }),
+  openAssetDetail: (id) => set({ activeAssetId: id, showAssetDetail: true, previousAssetDetailId: null }),
   
-  closeAssetDetail: () => set({ showAssetDetail: false, activeAssetId: null }),
+  closeAssetDetail: () => set({ showAssetDetail: false, activeAssetId: null, previousAssetDetailId: null }),
   
   openBorrowModal: (assetId) => set({ showBorrowModal: true, borrowModalAssetId: assetId }),
   
@@ -78,10 +82,34 @@ export const useUIStore = create<UIState>((set) => ({
   
   closeReminderHistoryModal: () => set({ showReminderHistoryModal: false, reminderHistoryRecordId: null }),
   
-  navigateToBorrowRecord: (recordId) => set({ 
-    currentPage: 'approval', 
-    showAssetDetail: false, 
-    activeAssetId: null,
-    highlightedBorrowRecordId: recordId 
-  }),
+  navigateToBorrowRecord: (recordId, assetId) => {
+    const state = get();
+    set({ 
+      currentPage: 'approval', 
+      showAssetDetail: false, 
+      activeAssetId: null,
+      highlightedBorrowRecordId: recordId,
+      previousAssetDetailId: assetId || state.activeAssetId,
+    });
+  },
+  
+  navigateBackToAssetDetail: () => {
+    const state = get();
+    if (state.previousAssetDetailId) {
+      set({
+        currentPage: 'assets',
+        activeAssetId: state.previousAssetDetailId,
+        showAssetDetail: true,
+        highlightedBorrowRecordId: null,
+        previousAssetDetailId: null,
+      });
+    } else {
+      set({
+        currentPage: 'assets',
+        highlightedBorrowRecordId: null,
+      });
+    }
+  },
+  
+  clearHighlightedRecord: () => set({ highlightedBorrowRecordId: null }),
 }));

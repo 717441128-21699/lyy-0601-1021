@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { BorrowRecord, BorrowFilters, CreateBorrowRequest, ReturnAssetData, BorrowStatus, CreateReminderRequest, ReminderRecord, CreateMultiBorrowRequest, AssetConflictInfo } from '@/types';
+import { BorrowRecord, BorrowFilters, CreateBorrowRequest, ReturnAssetData, BorrowStatus, CreateReminderRequest, ReminderRecord, CreateMultiBorrowRequest, AssetConflictInfo, BorrowBatch, ReminderFilters, BatchConflictInfo } from '@/types';
 import { borrowRecords as mockRecords } from '@/data/mockData';
 import { useAssetStore } from './assetStore';
 import { useUserStore } from './userStore';
 
 interface OccupancyInfo {
   id: string;
+  batchId: string;
   borrowDate: string;
   expectedReturnDate: string;
   status: string;
@@ -24,7 +25,7 @@ interface BorrowState {
   loading: boolean;
   fetchRecords: (filters?: BorrowFilters) => Promise<BorrowRecord[]>;
   createBorrowRequest: (data: CreateBorrowRequest) => void;
-  createMultiBorrowRequest: (data: CreateMultiBorrowRequest) => { success: string[]; failed: AssetConflictInfo[] };
+  createMultiBorrowRequest: (data: CreateMultiBorrowRequest) => { success: string[]; failed: AssetConflictInfo[]; batchId: string };
   approveBorrow: (ids: string[], note?: string) => void;
   rejectBorrow: (ids: string[], reason: string) => void;
   returnAsset: (id: string, data: ReturnAssetData) => void;
@@ -36,10 +37,22 @@ interface BorrowState {
   updateOverdueStatus: () => void;
   createReminder: (data: CreateReminderRequest) => ReminderRecord | null;
   getRemindersForRecord: (borrowRecordId: string) => ReminderRecord[];
-  getAllReminders: () => ReminderRecord[];
+  getAllReminders: (filters?: ReminderFilters) => ReminderRecord[];
+  getBatchById: (batchId: string) => BorrowBatch | null;
+  getBatches: (filters?: { month?: string; department?: string }) => BorrowBatch[];
+  getBatchRecords: (batchId: string) => BorrowRecord[];
+  checkBatchConflicts: (month?: string) => BatchConflictInfo[];
+  getMonthlyStatistics: (month: string, department?: string) => {
+    borrowTrend: { date: string; count: number }[];
+    departmentUsage: { department: string; count: number }[];
+    overdueList: BorrowRecord[];
+    idleAssets: { asset: any; daysIdle: number }[];
+  };
+  getRecordById: (id: string) => BorrowRecord | undefined;
 }
 
 const generateId = () => `bor-${Date.now().toString().slice(-6)}`;
+const generateBatchId = () => `batch-${Date.now().toString().slice(-6)}`;
 
 export const useBorrowStore = create<BorrowState>()(
   persist(
@@ -94,9 +107,11 @@ export const useBorrowStore = create<BorrowState>()(
         
         const approvers = useUserStore.getState().users.filter(u => u.role === 'approver' || u.role === 'admin');
         const approver = approvers[0];
+        const batchId = generateBatchId();
         
         const newRecord: BorrowRecord = {
           id: generateId(),
+          batchId,
           assetId: data.assetId,
           assetName: asset.name,
           assetNo: asset.assetNo,
@@ -127,10 +142,11 @@ export const useBorrowStore = create<BorrowState>()(
         const success: string[] = [];
         const failed: AssetConflictInfo[] = [];
         
-        if (!currentUser) return { success, failed };
+        if (!currentUser) return { success, failed, batchId: '' };
         
         const approvers = useUserStore.getState().users.filter(u => u.role === 'approver' || u.role === 'admin');
         const approver = approvers[0];
+        const batchId = generateBatchId();
         const newRecords: BorrowRecord[] = [];
         
         data.assetIds.forEach(assetId => {
@@ -150,6 +166,7 @@ export const useBorrowStore = create<BorrowState>()(
           
           const newRecord: BorrowRecord = {
             id: generateId(),
+            batchId,
             assetId: asset.id,
             assetName: asset.name,
             assetNo: asset.assetNo,
@@ -179,7 +196,7 @@ export const useBorrowStore = create<BorrowState>()(
           set(state => ({ records: [...newRecords, ...state.records] }));
         }
         
-        return { success, failed };
+        return { success, failed, batchId };
       },
 
       approveBorrow: (ids, note) => {
@@ -293,6 +310,7 @@ export const useBorrowStore = create<BorrowState>()(
                r.borrowDate <= futureDateStr
         ).map(r => ({
           id: r.id,
+          batchId: r.batchId,
           borrowDate: r.borrowDate,
           expectedReturnDate: r.expectedReturnDate,
           status: r.status,
@@ -409,8 +427,214 @@ export const useBorrowStore = create<BorrowState>()(
         return record?.reminders || [];
       },
 
-      getAllReminders: () => {
-        return get().records.flatMap(r => r.reminders || []);
+      getAllReminders: (filters) => {
+        let reminders = get().records.flatMap(r => r.reminders || []);
+        
+        if (filters?.method) {
+          reminders = reminders.filter(r => r.method === filters.method);
+        }
+        
+        if (filters?.remindedBy) {
+          reminders = reminders.filter(r => r.remindedBy === filters.remindedBy);
+        }
+        
+        if (filters?.startDate) {
+          reminders = reminders.filter(r => r.remindedAt >= filters.startDate!);
+        }
+        
+        if (filters?.endDate) {
+          reminders = reminders.filter(r => r.remindedAt <= filters.endDate!);
+        }
+        
+        return reminders.sort((a, b) => new Date(b.remindedAt).getTime() - new Date(a.remindedAt).getTime());
+      },
+
+      getBatchById: (batchId) => {
+        const records = get().records.filter(r => r.batchId === batchId);
+        if (records.length === 0) return null;
+        
+        const first = records[0];
+        return {
+          batchId,
+          purpose: first.purpose,
+          userId: first.userId,
+          userName: first.userName,
+          userDepartment: first.userDepartment,
+          borrowDate: first.borrowDate,
+          expectedReturnDate: first.expectedReturnDate,
+          createdAt: first.createdAt,
+          records,
+        };
+      },
+
+      getBatches: (filters) => {
+        const batchMap = new Map<string, BorrowRecord[]>();
+        
+        get().records.forEach(r => {
+          if (!batchMap.has(r.batchId)) {
+            batchMap.set(r.batchId, []);
+          }
+          batchMap.get(r.batchId)!.push(r);
+        });
+        
+        let batches: BorrowBatch[] = [];
+        batchMap.forEach((records, batchId) => {
+          const first = records[0];
+          batches.push({
+            batchId,
+            purpose: first.purpose,
+            userId: first.userId,
+            userName: first.userName,
+            userDepartment: first.userDepartment,
+            borrowDate: first.borrowDate,
+            expectedReturnDate: first.expectedReturnDate,
+            createdAt: first.createdAt,
+            records,
+          });
+        });
+        
+        if (filters?.month) {
+          const [year, month] = filters.month.split('-').map(Number);
+          const monthStart = new Date(year, month - 1, 1).toISOString().split('T')[0];
+          const monthEnd = new Date(year, month, 0).toISOString().split('T')[0];
+          batches = batches.filter(b => 
+            b.borrowDate >= monthStart && b.borrowDate <= monthEnd
+          );
+        }
+        
+        if (filters?.department) {
+          batches = batches.filter(b => b.userDepartment === filters.department);
+        }
+        
+        return batches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
+
+      getBatchRecords: (batchId) => {
+        return get().records.filter(r => r.batchId === batchId);
+      },
+
+      checkBatchConflicts: (month) => {
+        const conflicts: BatchConflictInfo[] = [];
+        const dateAssetMap = new Map<string, Map<string, BorrowRecord[]>>();
+        
+        let records = get().records.filter(r => 
+          ['pending', 'approved', 'overdue'].includes(r.status)
+        );
+        
+        if (month) {
+          const [year, m] = month.split('-').map(Number);
+          const monthStart = new Date(year, m - 1, 1);
+          const monthEnd = new Date(year, m, 0);
+          const monthStartStr = monthStart.toISOString().split('T')[0];
+          const monthEndStr = monthEnd.toISOString().split('T')[0];
+          records = records.filter(r => 
+            r.borrowDate <= monthEndStr && r.expectedReturnDate >= monthStartStr
+          );
+        }
+        
+        records.forEach(record => {
+          const start = new Date(record.borrowDate);
+          const end = new Date(record.expectedReturnDate);
+          
+          for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const dateStr = d.toISOString().split('T')[0];
+            if (!dateAssetMap.has(dateStr)) {
+              dateAssetMap.set(dateStr, new Map());
+            }
+            const assetMap = dateAssetMap.get(dateStr)!;
+            if (!assetMap.has(record.assetId)) {
+              assetMap.set(record.assetId, []);
+            }
+            assetMap.get(record.assetId)!.push(record);
+          }
+        });
+        
+        dateAssetMap.forEach((assetMap, date) => {
+          assetMap.forEach((assetRecords, assetId) => {
+            if (assetRecords.length > 1) {
+              const batchIds = new Set(assetRecords.map(r => r.batchId));
+              if (batchIds.size > 1) {
+                assetRecords.forEach(record => {
+                  conflicts.push({
+                    date,
+                    assetId,
+                    assetName: record.assetName,
+                    batchId: record.batchId,
+                    batchPurpose: record.purpose,
+                    userName: record.userName,
+                  });
+                });
+              }
+            }
+          });
+        });
+        
+        return conflicts;
+      },
+
+      getMonthlyStatistics: (month, department) => {
+        const [year, m] = month.split('-').map(Number);
+        const monthStart = new Date(year, m - 1, 1);
+        const monthEnd = new Date(year, m, 0);
+        const monthStartStr = monthStart.toISOString().split('T')[0];
+        const monthEndStr = monthEnd.toISOString().split('T')[0];
+        
+        let filteredRecords = get().records.filter(r => 
+          r.borrowDate >= monthStartStr && r.borrowDate <= monthEndStr
+        );
+        
+        if (department) {
+          filteredRecords = filteredRecords.filter(r => r.userDepartment === department);
+        }
+        
+        const borrowTrend: { date: string; count: number }[] = [];
+        const deptMap = new Map<string, number>();
+        
+        for (let d = new Date(monthStart); d <= monthEnd; d.setDate(d.getDate() + 1)) {
+          const dateStr = d.toISOString().split('T')[0];
+          const count = filteredRecords.filter(r => r.borrowDate === dateStr).length;
+          borrowTrend.push({ date: dateStr, count });
+        }
+        
+        filteredRecords.forEach(r => {
+          deptMap.set(r.userDepartment, (deptMap.get(r.userDepartment) || 0) + 1);
+        });
+        
+        const departmentUsage = Array.from(deptMap.entries())
+          .map(([department, count]) => ({ department, count }))
+          .sort((a, b) => b.count - a.count);
+        
+        const today = new Date().toISOString().split('T')[0];
+        let overdueList = get().records.filter(
+          r => (r.status === 'approved' || r.status === 'overdue') && r.expectedReturnDate < today
+        ).filter(r => 
+          r.expectedReturnDate >= monthStartStr && r.expectedReturnDate <= monthEndStr
+        );
+        
+        if (department) {
+          overdueList = overdueList.filter(r => r.userDepartment === department);
+        }
+        
+        const { assets } = useAssetStore.getState();
+        const idleAssets = assets.filter(a => a.status === 'available').map(asset => {
+          const lastBorrow = get().records
+            .filter(r => r.assetId === asset.id && r.status !== 'rejected')
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+          
+          let daysIdle = 30;
+          if (lastBorrow) {
+            const lastDate = lastBorrow.actualReturnDate || lastBorrow.expectedReturnDate;
+            daysIdle = Math.floor((new Date(today).getTime() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
+          }
+          
+          return { asset, daysIdle: Math.max(0, daysIdle) };
+        }).filter(i => i.daysIdle >= 7).sort((a, b) => b.daysIdle - a.daysIdle);
+        
+        return { borrowTrend, departmentUsage, overdueList, idleAssets };
+      },
+
+      getRecordById: (id) => {
+        return get().records.find(r => r.id === id);
       },
     }),
     {
